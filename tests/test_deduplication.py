@@ -16,14 +16,14 @@ from internship_engine.models import JobPosting
 def _posting(
     title: str = "Software Engineer Intern",
     company: str = "Acme Corp",
-    url: str = "https://example.com/job/1",
+    posting_url: str = "https://example.com/job/1",
     **kwargs,
 ) -> JobPosting:
     return JobPosting(
         title=title,
         company=company,
         location="Remote",
-        url=url,
+        posting_url=posting_url,
         **kwargs,
     )
 
@@ -69,9 +69,9 @@ class TestComputeHashStability:
         p2 = _posting(company="acme corp")
         assert compute_hash(p1) == compute_hash(p2)
 
-    def test_case_normalised_in_url(self):
-        p1 = _posting(url="HTTPS://EXAMPLE.COM/JOB/1")
-        p2 = _posting(url="https://example.com/job/1")
+    def test_case_normalised_in_posting_url(self):
+        p1 = _posting(posting_url="HTTPS://EXAMPLE.COM/JOB/1")
+        p2 = _posting(posting_url="https://example.com/job/1")
         assert compute_hash(p1) == compute_hash(p2)
 
 
@@ -82,8 +82,8 @@ class TestComputeHashStability:
 
 class TestComputeHashUniqueness:
     def test_different_url_gives_different_hash(self):
-        p1 = _posting(url="https://example.com/job/1")
-        p2 = _posting(url="https://example.com/job/2")
+        p1 = _posting(posting_url="https://example.com/job/1")
+        p2 = _posting(posting_url="https://example.com/job/2")
         assert compute_hash(p1) != compute_hash(p2)
 
     def test_different_company_gives_different_hash(self):
@@ -102,11 +102,11 @@ class TestComputeHashUniqueness:
         p2 = _posting(description="Totally different description!")
         assert compute_hash(p1) == compute_hash(p2)
 
-    def test_posted_date_change_does_not_change_hash(self):
+    def test_date_posted_change_does_not_change_hash(self):
         from datetime import date
 
-        p1 = _posting(posted_date=date(2024, 1, 1))
-        p2 = _posting(posted_date=date(2025, 6, 15))
+        p1 = _posting(date_posted=date(2024, 1, 1))
+        p2 = _posting(date_posted=date(2025, 6, 15))
         assert compute_hash(p1) == compute_hash(p2)
 
 
@@ -128,13 +128,13 @@ class TestDuplicateFilterIsNew:
 
     def test_different_posting_is_new(self):
         df = DuplicateFilter()
-        df.is_new(_posting(url="https://example.com/1"))
-        assert df.is_new(_posting(url="https://example.com/2")) is True
+        df.is_new(_posting(posting_url="https://example.com/1"))
+        assert df.is_new(_posting(posting_url="https://example.com/2")) is True
 
     def test_seen_count_increments_for_unique(self):
         df = DuplicateFilter()
-        df.is_new(_posting(url="https://example.com/1"))
-        df.is_new(_posting(url="https://example.com/2"))
+        df.is_new(_posting(posting_url="https://example.com/1"))
+        df.is_new(_posting(posting_url="https://example.com/2"))
         assert df.seen_count == 2
 
     def test_seen_count_unchanged_for_duplicate(self):
@@ -153,8 +153,8 @@ class TestDuplicateFilterIsNew:
 class TestDuplicateFilterFilterNew:
     def test_removes_duplicates_within_batch(self):
         df = DuplicateFilter()
-        p1 = _posting(url="https://example.com/1")
-        p2 = _posting(url="https://example.com/2")
+        p1 = _posting(posting_url="https://example.com/1")
+        p2 = _posting(posting_url="https://example.com/2")
         result = df.filter_new([p1, p2, p1])
         assert result == [p1, p2]
 
@@ -167,7 +167,7 @@ class TestDuplicateFilterFilterNew:
 
     def test_preserves_order(self):
         df = DuplicateFilter()
-        postings = [_posting(url=f"https://example.com/{i}") for i in range(5)]
+        postings = [_posting(posting_url=f"https://example.com/{i}") for i in range(5)]
         assert df.filter_new(postings) == postings
 
     def test_empty_input_returns_empty(self):

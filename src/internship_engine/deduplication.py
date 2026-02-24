@@ -1,7 +1,7 @@
 """Deduplication hashing system for job postings.
 
 A posting's identity is defined by three canonical fields:
-  title (lowercased + stripped) + company (lowercased + stripped) + url (lowercased + stripped)
+  title + company + posting_url  (all lowercased and stripped)
 
 This makes the hash robust to minor whitespace / capitalisation differences
 while still uniquely identifying a posting across repeated fetches.
@@ -26,7 +26,7 @@ def compute_hash(posting: JobPosting) -> str:
     """Return a stable 64-character SHA-256 hex digest for *posting*.
 
     The digest is derived exclusively from ``title``, ``company``, and
-    ``url`` — the fields that together uniquely identify a role at a
+    ``posting_url`` — the fields that together uniquely identify a role at a
     company.  Description and dates are intentionally excluded so that
     minor editorial changes to a posting do not produce a new hash.
 
@@ -44,7 +44,7 @@ def compute_hash(posting: JobPosting) -> str:
         [
             posting.title.lower().strip(),
             posting.company.lower().strip(),
-            posting.url.lower().strip(),
+            posting.posting_url.lower().strip(),
         ]
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

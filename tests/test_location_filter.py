@@ -18,7 +18,7 @@ def _posting(location: str, suffix: str = "1") -> JobPosting:
         title="Software Engineer Intern",
         company="Acme Corp",
         location=location,
-        url=f"https://example.com/job/{suffix}",
+        posting_url=f"https://example.com/job/{suffix}",
     )
 
 
