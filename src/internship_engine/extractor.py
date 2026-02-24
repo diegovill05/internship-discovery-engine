@@ -46,14 +46,6 @@ _RETRY_TOTAL = 3
 _RETRY_BACKOFF = 0.4
 _RETRY_ON_STATUS = [429, 500, 502, 503, 504]
 
-# ISO 8601 date formats we accept from datePosted
-_DATE_FORMATS = [
-    "%Y-%m-%d",
-    "%Y-%m-%dT%H:%M:%S",
-    "%Y-%m-%dT%H:%M:%SZ",
-    "%Y-%m-%dT%H:%M:%S%z",
-]
-
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -273,19 +265,21 @@ def _parse_location(schema: dict) -> str:
 def _parse_date(
     date_str: object,
 ) -> tuple[Optional[date], DatePostedConfidence]:
-    """Parse a schema.org datePosted string into a (date, confidence) pair."""
+    """Parse a schema.org datePosted string into a (date, confidence) pair.
+
+    Uses :func:`datetime.fromisoformat` (Python 3.11+) which accepts all
+    ISO 8601 variants including timezone designators and the ``Z`` suffix.
+    Returns ``(None, UNKNOWN)`` for any unparseable or non-string input.
+    """
     if not date_str or not isinstance(date_str, str):
         return None, DatePostedConfidence.UNKNOWN
 
     raw = date_str.strip()
-    # Try increasingly lenient formats
-    for fmt in _DATE_FORMATS:
-        try:
-            # Truncate input to the length of the format to avoid mismatches
-            parsed = datetime.strptime(raw[: len(fmt)], fmt)
-            return parsed.date(), DatePostedConfidence.EXACT
-        except ValueError:
-            continue
+    try:
+        parsed = datetime.fromisoformat(raw)
+        return parsed.date(), DatePostedConfidence.EXACT
+    except ValueError:
+        pass
 
     logger.debug("Could not parse datePosted %r", date_str)
     return None, DatePostedConfidence.UNKNOWN
