@@ -19,7 +19,7 @@ def _posting(title: str, description: str = "") -> JobPosting:
         company="Acme Corp",
         location="New York, NY",
         description=description,
-        url="https://example.com/job/1",
+        posting_url="https://example.com/job/1",
     )
 
 
