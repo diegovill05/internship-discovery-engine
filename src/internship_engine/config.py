@@ -63,6 +63,17 @@ class Settings(BaseSettings):
         ),
     ] = ["software", "data", "product"]
 
+    # --- Google Custom Search API ------------------------------------
+    google_api_key: str = Field(
+        default="",
+        description="Google Custom Search JSON API key (IE_GOOGLE_API_KEY).",
+    )
+
+    google_cse_id: str = Field(
+        default="",
+        description="Google Programmable Search Engine ID (IE_GOOGLE_CSE_ID).",
+    )
+
     # --- Deduplication ------------------------------------------------
     seen_hashes_path: Path = Field(
         default=Path(".cache/seen_hashes.txt"),
