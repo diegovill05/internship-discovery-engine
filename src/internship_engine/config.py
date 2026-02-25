@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     All fields can be overridden via environment variables with the
     ``IE_`` prefix (case-insensitive), e.g. ``IE_REMOTE_INCLUDED=false``.
 
-    List-valued fields accept a comma-separated string from the
-    environment, e.g. ``IE_ALLOWED_LOCATIONS=New York,Austin``.
+    List-valued fields must be supplied as a JSON array from the
+    environment, e.g. ``IE_ALLOWED_LOCATIONS=["New York","Austin"]``.
     """
 
     model_config = SettingsConfigDict(
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
                 "Empty list means all locations are accepted."
             ),
         ),
-    ] = []
+    ]
 
     remote_included: bool = Field(
         default=True,
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
             default_factory=lambda: ["software", "data", "product"],
             description="Category names of interest (used for downstream filtering).",
         ),
-    ] = ["software", "data", "product"]
+    ]
 
     # --- Search provider API keys -------------------------------------
     brave_api_key: str = Field(
