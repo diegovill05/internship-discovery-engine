@@ -6,6 +6,7 @@ on:
 jobs:
   test-search:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -26,7 +27,5 @@ jobs:
         run: |
           internship-engine run \
             --source brave \
-            --keyword "intern OR internship (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com OR site:myworkdayjobs.com)" \
-            --location "San Antonio" \
-            --max-results 5
-            
+            --keyword "san antonio (intern OR internship) (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com OR site:myworkdayjobs.com)" \
+            --max-results 15
