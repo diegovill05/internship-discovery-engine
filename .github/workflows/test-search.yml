@@ -26,7 +26,7 @@ jobs:
         run: |
           internship-engine run \
             --source brave \
-            --keyword internship \
+            --keyword "intern OR internship (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com OR site:myworkdayjobs.com)" \
             --location "San Antonio" \
             --max-results 5
             
