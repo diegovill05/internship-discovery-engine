@@ -63,7 +63,12 @@ class Settings(BaseSettings):
         ),
     ] = ["software", "data", "product"]
 
-    # --- Google Custom Search API ------------------------------------
+    # --- Search provider API keys -------------------------------------
+    brave_api_key: str = Field(
+        default="",
+        description="Brave Search API subscription token (IE_BRAVE_API_KEY).",
+    )
+
     google_api_key: str = Field(
         default="",
         description="Google Custom Search JSON API key (IE_GOOGLE_API_KEY).",
