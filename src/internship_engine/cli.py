@@ -175,17 +175,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         ext = extractor.fetch_and_extract(result.url)
 
         # Build JobPosting — fall back to search snippet when extraction failed
-        posting = JobPosting(
-            title=ext.title or result.title,
-            company=ext.company,
-            location=ext.location,
-            description=ext.description,
-            posting_url=result.url,
-            apply_url=ext.apply_url,
-            date_posted=ext.date_posted,
-            date_posted_confidence=ext.date_posted_confidence,
-            source=source_name,
-        )
+        posting = _make_posting(result, ext, source_name)
 
         # ── Date filter (only when confidence is EXACT) ───────────────────
         if (
@@ -196,8 +186,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         ):
             continue
 
-        # ── Location filter ───────────────────────────────────────────────
-        if not loc_filter.matches(posting):
+        # ── Location filter (skip for blocked postings — location unknown) ─
+        if not ext.blocked and not loc_filter.matches(posting):
             continue
 
         # ── Deduplication ─────────────────────────────────────────────────
@@ -217,6 +207,28 @@ def cmd_run(args: argparse.Namespace) -> int:
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
     return 0
+
+
+def _make_posting(result, ext, source_name: str):
+    """Build a :class:`~internship_engine.models.JobPosting` from a search result.
+
+    When *ext.blocked* is True (page inaccessible / HTTP 403), the posting is
+    populated from the raw search-result metadata so the run still surfaces a
+    usable record.
+    """
+    from internship_engine.models import JobPosting
+
+    return JobPosting(
+        title=ext.title or result.title,
+        company=ext.company or ("Unknown" if ext.blocked else ""),
+        location=ext.location or ("Unknown" if ext.blocked else ""),
+        description=ext.description or (result.snippet if ext.blocked else ""),
+        posting_url=result.url,
+        apply_url=ext.apply_url,
+        date_posted=ext.date_posted,
+        date_posted_confidence=ext.date_posted_confidence,
+        source=source_name,
+    )
 
 
 def _build_source(args: argparse.Namespace, settings):
