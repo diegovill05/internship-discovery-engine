@@ -11,8 +11,9 @@ Usage examples
 --------------
 $ internship-engine list-categories
 $ internship-engine run --location "New York, NY" --category software
-$ internship-engine run --keyword Python --max-results 20 --posted-within-days 7
-$ internship-engine run --no-remote --location "San Francisco, CA" --location "Austin, TX"
+$ internship-engine run --source brave --keyword Python --max-results 20
+$ internship-engine run --source google --location "San Francisco, CA"
+$ internship-engine run --no-remote --posted-within-days 7
 """
 
 from __future__ import annotations
@@ -49,9 +50,16 @@ def build_parser() -> argparse.ArgumentParser:
         "run",
         help="Fetch, filter, and display new internship postings.",
         description=(
-            "Fetch new postings via Google Custom Search, extract structured\n"
-            "data, apply location / category / dedup filters, and print a summary."
+            "Fetch new postings via a search provider (Brave or Google),\n"
+            "extract structured data, apply location / category / dedup\n"
+            "filters, and print a summary."
         ),
+    )
+    run_parser.add_argument(
+        "--source",
+        choices=["brave", "google"],
+        default="brave",
+        help="Search provider to use (default: brave).",
     )
     run_parser.add_argument(
         "--location",
@@ -130,29 +138,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     from internship_engine.extractor import Extractor
     from internship_engine.location_filter import LocationFilter
     from internship_engine.models import DatePostedConfidence, JobPosting
-    from internship_engine.sources.google_search import (
-        GoogleSearchConfig,
-        GoogleSearchSource,
-    )
 
     settings = get_settings()
 
-    # ── Credential check ──────────────────────────────────────────────────
-    if not settings.google_api_key or not settings.google_cse_id:
-        print(
-            "Error: IE_GOOGLE_API_KEY and IE_GOOGLE_CSE_ID must be set.\n"
-            "Copy .env.example to .env and fill in your credentials."
-        )
-        return 1
+    # ── Build the search source ───────────────────────────────────────────
+    source, source_name = _build_source(args, settings)
+    if source is None:
+        return 1  # credential error already printed
 
     # ── Fetch raw search results ──────────────────────────────────────────
-    config = GoogleSearchConfig(
-        api_key=settings.google_api_key,
-        cse_id=settings.google_cse_id,
-        max_results=args.max_results,
-        posted_within_days=args.posted_within_days,
-    )
-    source = GoogleSearchSource(config)
     raw_results = source.fetch(
         locations=args.locations,
         keywords=args.keywords,
@@ -191,7 +185,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             apply_url=ext.apply_url,
             date_posted=ext.date_posted,
             date_posted_confidence=ext.date_posted_confidence,
-            source="google",
+            source=source_name,
         )
 
         # ── Date filter (only when confidence is EXACT) ───────────────────
@@ -224,6 +218,51 @@ def cmd_run(args: argparse.Namespace) -> int:
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
     return 0
+
+
+def _build_source(args: argparse.Namespace, settings):
+    """Return ``(source_instance, source_name)`` or ``(None, ...)`` on error."""
+    if args.source == "brave":
+        from internship_engine.sources.brave_search import (
+            BraveSearchConfig,
+            BraveSearchSource,
+        )
+
+        if not settings.brave_api_key:
+            print(
+                "Error: IE_BRAVE_API_KEY must be set.\n"
+                "Get an API key at https://brave.com/search/api/ and add it\n"
+                "to your .env file or set it as a GitHub Actions secret."
+            )
+            return None, "brave"
+
+        config = BraveSearchConfig(
+            api_key=settings.brave_api_key,
+            max_results=args.max_results,
+            posted_within_days=args.posted_within_days,
+        )
+        return BraveSearchSource(config), "brave"
+
+    # args.source == "google"
+    from internship_engine.sources.google_search import (
+        GoogleSearchConfig,
+        GoogleSearchSource,
+    )
+
+    if not settings.google_api_key or not settings.google_cse_id:
+        print(
+            "Error: IE_GOOGLE_API_KEY and IE_GOOGLE_CSE_ID must be set.\n"
+            "Copy .env.example to .env and fill in your credentials."
+        )
+        return None, "google"
+
+    config = GoogleSearchConfig(
+        api_key=settings.google_api_key,
+        cse_id=settings.google_cse_id,
+        max_results=args.max_results,
+        posted_within_days=args.posted_within_days,
+    )
+    return GoogleSearchSource(config), "google"
 
 
 def _print_summary(postings: list) -> None:
