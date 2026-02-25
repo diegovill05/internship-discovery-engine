@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from internship_engine.location_filter import LocationFilter, apply_location_filter
 from internship_engine.models import JobPosting
-
 
 # ---------------------------------------------------------------------------
 # Helpers

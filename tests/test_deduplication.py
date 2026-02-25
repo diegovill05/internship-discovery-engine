@@ -7,7 +7,6 @@ import pytest
 from internship_engine.deduplication import DuplicateFilter, compute_hash
 from internship_engine.models import JobPosting
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

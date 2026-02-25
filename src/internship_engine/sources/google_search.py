@@ -26,7 +26,7 @@ exceeds 10 the source makes multiple paginated requests (using the
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import requests
 
@@ -237,7 +237,11 @@ class GoogleSearchSource:
         except requests.exceptions.Timeout:
             logger.warning("Google Search API timed out for query: %r", query)
         except requests.exceptions.HTTPError as exc:
-            logger.warning("Google Search API HTTP error %s for query: %r", exc.response.status_code, query)
+            logger.warning(
+                "Google Search API HTTP error %s for query: %r",
+                exc.response.status_code,
+                query,
+            )
         except requests.exceptions.RequestException as exc:
             logger.warning("Google Search API request failed: %s", exc)
 

@@ -24,7 +24,6 @@ from datetime import date, timedelta
 
 from internship_engine import __version__
 
-
 # ---------------------------------------------------------------------------
 # Parser construction
 # ---------------------------------------------------------------------------
@@ -272,7 +271,10 @@ def _print_summary(postings: list) -> None:
         return
 
     print(f"\nFound {len(postings)} posting(s):\n")
-    header = f"  {'#':<3}  {'Category':<12}  {'Title':<40}  {'Company':<25}  {'Location':<25}  Date"
+    header = (
+        f"  {'#':<3}  {'Category':<12}  {'Title':<40}"
+        f"  {'Company':<25}  {'Location':<25}  Date"
+    )
     print(header)
     print("  " + "-" * (len(header) - 2))
 
@@ -283,9 +285,11 @@ def _print_summary(postings: list) -> None:
         loc = (p.location[:23] + "..") if len(p.location) > 25 else p.location
         date_str = str(p.date_posted) if p.date_posted else "unknown"
         conf_marker = "" if p.date_posted_confidence.value == "exact" else "~"
-        print(
-            f"  {i:<3}  {cat:<12}  {title:<40}  {company:<25}  {loc:<25}  {conf_marker}{date_str}"
+        row = (
+            f"  {i:<3}  {cat:<12}  {title:<40}"
+            f"  {company:<25}  {loc:<25}  {conf_marker}{date_str}"
         )
+        print(row)
         print(f"       {p.posting_url}")
         print()
 

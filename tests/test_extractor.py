@@ -8,21 +8,14 @@ All tests are purely in-process; no network calls are made.
 from __future__ import annotations
 
 from datetime import date
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from internship_engine.extractor import (
     Extractor,
-    ExtractionResult,
-    parse_html,
-    _find_job_posting_schema,
-    _parse_company,
-    _parse_location,
     _parse_date,
+    parse_html,
 )
 from internship_engine.models import DatePostedConfidence
-
 
 # ---------------------------------------------------------------------------
 # HTML fixtures
@@ -60,7 +53,11 @@ _FULL_POSTING_HTML = """
 _MINIMAL_POSTING_HTML = """
 <html><body>
 <script type="application/ld+json">
-{"@type": "JobPosting", "title": "Data Intern", "hiringOrganization": {"name": "Globex"}}
+{
+  "@type": "JobPosting",
+  "title": "Data Intern",
+  "hiringOrganization": {"name": "Globex"}
+}
 </script>
 </body></html>
 """
@@ -79,7 +76,11 @@ _GRAPH_POSTING_HTML = """
       "hiringOrganization": {"name": "Initech"},
       "jobLocation": {
         "@type": "Place",
-        "address": {"addressLocality": "Austin", "addressRegion": "TX", "addressCountry": "US"}
+        "address": {
+          "addressLocality": "Austin",
+          "addressRegion": "TX",
+          "addressCountry": "US"
+        }
       }
     }
   ]
@@ -125,7 +126,9 @@ _NO_JSON_LD_HTML = """
 _MALFORMED_JSON_LD_HTML = """
 <html><body>
 <script type="application/ld+json">{ this is: not valid json }</script>
-<script type="application/ld+json">{"@type": "JobPosting", "title": "Valid Intern"}</script>
+<script type="application/ld+json">
+{"@type": "JobPosting", "title": "Valid Intern"}
+</script>
 </body></html>
 """
 
@@ -180,11 +183,15 @@ class TestParseHtmlFullSchema:
         assert r.employment_type == "INTERN"
 
     def test_apply_url_when_different_from_source(self):
-        r = parse_html(_FULL_POSTING_HTML, source_url="https://jobs.acme.com/swe-intern")
+        r = parse_html(
+            _FULL_POSTING_HTML, source_url="https://jobs.acme.com/swe-intern"
+        )
         assert r.apply_url == "https://jobs.acme.com/apply/swe-intern"
 
     def test_apply_url_none_when_same_as_source(self):
-        r = parse_html(_FULL_POSTING_HTML, source_url="https://jobs.acme.com/apply/swe-intern")
+        r = parse_html(
+            _FULL_POSTING_HTML, source_url="https://jobs.acme.com/apply/swe-intern"
+        )
         assert r.apply_url is None
 
     def test_not_blocked(self):
@@ -210,7 +217,10 @@ class TestParseHtmlMinimalSchema:
         assert parse_html(_MINIMAL_POSTING_HTML).date_posted is None
 
     def test_date_confidence_unknown_when_absent(self):
-        assert parse_html(_MINIMAL_POSTING_HTML).date_posted_confidence == DatePostedConfidence.UNKNOWN
+        assert (
+            parse_html(_MINIMAL_POSTING_HTML).date_posted_confidence
+            == DatePostedConfidence.UNKNOWN
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +319,9 @@ class TestParseHtmlEmptyBody:
 
 class TestParseHtmlApplyUrl:
     def test_apply_url_present_when_different(self):
-        r = parse_html(_APPLY_URL_HTML, source_url="https://figma.com/careers/design-intern")
+        r = parse_html(
+            _APPLY_URL_HTML, source_url="https://figma.com/careers/design-intern"
+        )
         assert r.apply_url == "https://apply.figma.com/jobs/123"
 
     def test_apply_url_none_when_absent(self):

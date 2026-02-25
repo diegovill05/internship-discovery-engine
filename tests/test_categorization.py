@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
-
 from internship_engine.categorization import categorize
 from internship_engine.models import Category, JobPosting
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +86,9 @@ class TestCategorizeByDescription:
         assert categorize(p) == Category.DATA
 
     def test_description_overrides_ambiguous_title(self):
-        p = _posting("Research Intern", description="Deep learning and computer vision.")
+        p = _posting(
+            "Research Intern", description="Deep learning and computer vision."
+        )
         assert categorize(p) == Category.DATA
 
 
