@@ -168,13 +168,12 @@ class BraveSearchSource:
         backoff = _INITIAL_BACKOFF
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                resp = self._session.get(
-                    _BRAVE_URL, params=params, timeout=15
-                )
+                resp = self._session.get(_BRAVE_URL, params=params, timeout=15)
                 if resp.status_code == 429:
                     if attempt < _MAX_RETRIES:
                         logger.warning(
-                            "Brave API 429 rate-limited; retrying in %.1fs (attempt %d/%d)",
+                            "Brave API 429 rate-limited; retrying in %.1fs"
+                            " (attempt %d/%d)",
                             backoff,
                             attempt + 1,
                             _MAX_RETRIES,

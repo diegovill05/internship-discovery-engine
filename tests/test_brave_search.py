@@ -7,18 +7,16 @@ All tests are network-free:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
 from internship_engine.sources.brave_search import (
+    _PAGE_SIZE,
     BraveSearchConfig,
     BraveSearchSource,
-    _BRAVE_URL,
-    _PAGE_SIZE,
 )
 from internship_engine.sources.google_search import RawSearchResult
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,9 +41,7 @@ def _make_web_results(
     ]
 
 
-def _mock_session(
-    web_results: list[dict], status_code: int = 200
-) -> MagicMock:
+def _mock_session(web_results: list[dict], status_code: int = 200) -> MagicMock:
     """Return a session whose GET returns a Brave-shaped API response."""
     session = MagicMock()
     response = MagicMock()
@@ -128,9 +124,7 @@ class TestBraveSearchSourceFetch:
 
     def test_no_results_when_url_missing(self):
         bad_items = [{"title": "No URL", "description": "..."}]
-        source = BraveSearchSource(
-            _config(), session=_mock_session(bad_items)
-        )
+        source = BraveSearchSource(_config(), session=_mock_session(bad_items))
         assert source.fetch([], [], []) == []
 
     def test_one_query_per_location(self):
@@ -202,7 +196,11 @@ class TestBraveSearchPagination:
         # Second call should have offset parameter
         calls = session.get.call_args_list
         assert len(calls) >= 2
-        second_call_params = calls[1][1].get("params") or calls[1][0][1] if len(calls[1]) > 1 else calls[1].kwargs.get("params", {})
+        second_call_params = (
+            calls[1][1].get("params") or calls[1][0][1]
+            if len(calls[1]) > 1
+            else calls[1].kwargs.get("params", {})
+        )
         assert second_call_params.get("offset") == _PAGE_SIZE
 
 
@@ -263,9 +261,7 @@ class TestBraveSearch429Retry:
         resp_429.status_code = 429
         session.get.return_value = resp_429
 
-        source = BraveSearchSource(
-            _config(), session=session, sleep_fn=lambda _: None
-        )
+        source = BraveSearchSource(_config(), session=session, sleep_fn=lambda _: None)
         assert source.fetch([], [], []) == []
 
 

@@ -7,10 +7,7 @@ All tests are network-free:
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
-
-import pytest
 
 from internship_engine.sources.google_search import (
     GoogleSearchConfig,
@@ -18,7 +15,6 @@ from internship_engine.sources.google_search import (
     RawSearchResult,
     build_queries,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -142,7 +138,9 @@ class TestGoogleSearchSourceFetch:
         assert result.snippet == "Snippet 1"
 
     def test_capped_by_max_results(self):
-        source = GoogleSearchSource(_config(max_results=3), session=_mock_session(_make_items(10)))
+        source = GoogleSearchSource(
+            _config(max_results=3), session=_mock_session(_make_items(10))
+        )
         results = source.fetch([], [], [])
         assert len(results) <= 3
 
