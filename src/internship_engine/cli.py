@@ -113,6 +113,24 @@ def build_parser() -> argparse.ArgumentParser:
             "Applied only when date_posted_confidence is EXACT."
         ),
     )
+    run_parser.add_argument(
+        "--export",
+        choices=["sheets", "none"],
+        default="none",
+        help="Export destination for matched postings (default: none).",
+    )
+    run_parser.add_argument(
+        "--sheet-id",
+        default=None,
+        metavar="SHEET_ID",
+        help="Google Sheet ID to export to (overrides IE_SHEET_ID).",
+    )
+    run_parser.add_argument(
+        "--sheet-tab",
+        default=None,
+        metavar="TAB",
+        help="Worksheet tab name to write into (overrides IE_SHEET_TAB).",
+    )
 
     # --- list-categories --------------------------------------------------
     subparsers.add_parser(
@@ -206,6 +224,11 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
+
+    # ── Optional Sheets export ────────────────────────────────────────────
+    if args.export == "sheets":
+        return _export_to_sheets(args, settings, postings)
+
     return 0
 
 
@@ -229,6 +252,50 @@ def _make_posting(result, ext, source_name: str):
         date_posted_confidence=ext.date_posted_confidence,
         source=source_name,
     )
+
+
+def _export_to_sheets(
+    args: argparse.Namespace,
+    settings,
+    postings: list,
+) -> int:
+    """Validate credentials then write *postings* to Google Sheets.
+
+    Returns 0 on success, 1 on configuration / runtime error.
+    """
+    from internship_engine.sheets import export_postings
+
+    sheet_id = args.sheet_id or settings.sheet_id
+    if not sheet_id:
+        print(
+            "Error: --sheet-id or IE_SHEET_ID is required for --export sheets."
+        )
+        return 1
+
+    if not settings.google_service_account_json:
+        print(
+            "Error: GOOGLE_SERVICE_ACCOUNT_JSON is required for --export sheets.\n"
+            "Set it as a GitHub Actions secret or in your local environment."
+        )
+        return 1
+
+    tab = args.sheet_tab or settings.sheet_tab
+
+    try:
+        added = export_postings(
+            settings,
+            postings,
+            sheet_id=sheet_id,
+            tab_name=tab,
+        )
+        print(f"\nExported {added} new posting(s) to Google Sheets.")
+        if len(postings) - added:
+            print(f"Skipped {len(postings) - added} duplicate(s) already in sheet.")
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error exporting to Google Sheets: {exc}")
+        return 1
+
+    return 0
 
 
 def _build_source(args: argparse.Namespace, settings):

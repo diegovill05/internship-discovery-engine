@@ -170,6 +170,9 @@ class TestLocationFilterBypass:
             categories=[],
             max_results=10,
             posted_within_days=None,
+            export="none",
+            sheet_id=None,
+            sheet_tab=None,
         )
 
         mock_source = MagicMock()
