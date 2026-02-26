@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -87,6 +87,36 @@ class TestEnsureHeader:
         with pytest.raises(ValueError, match="header mismatch"):
             ensure_header(ws)
 
+    # -- Auto-migration (old 11-col header → new 14-col) -------------------
+
+    def test_auto_migrates_prefix_header(self):
+        """Legacy 11-column header triggers column append, not an error."""
+        old_header = COLUMNS[:11]
+        ws = _fake_worksheet([old_header])
+        ensure_header(ws)  # must not raise
+        ws.insert_row.assert_not_called()
+        assert ws.update_cell.call_count == len(COLUMNS) - 11
+
+    def test_auto_migration_appends_correct_column_names(self):
+        old_header = COLUMNS[:11]
+        ws = _fake_worksheet([old_header])
+        ensure_header(ws)
+        ws.update_cell.assert_has_calls(
+            [
+                call(1, 12, "Status"),
+                call(1, 13, "Status Reason"),
+                call(1, 14, "Track Match"),
+            ]
+        )
+
+    def test_partial_migration_appends_only_missing(self):
+        """Sheet with 13 cols only gets the 14th column appended."""
+        header_13 = COLUMNS[:13]
+        ws = _fake_worksheet([header_13])
+        ensure_header(ws)
+        assert ws.update_cell.call_count == 1
+        ws.update_cell.assert_called_once_with(1, 14, "Track Match")
+
 
 # ---------------------------------------------------------------------------
 # _posting_to_row
@@ -154,6 +184,37 @@ class TestPostingToRow:
         p = _make_posting(source="google")
         row = _posting_to_row(p, "h", "2024-01-01")
         assert row[COLUMNS.index("Source")] == "google"
+
+    def test_status_default_unknown(self):
+        p = _make_posting()
+        row = _posting_to_row(p, "h", "2024-01-01")
+        assert row[COLUMNS.index("Status")] == "unknown"
+
+    def test_active_reason_empty_by_default(self):
+        p = _make_posting()
+        row = _posting_to_row(p, "h", "2024-01-01")
+        assert row[COLUMNS.index("Status Reason")] == ""
+
+    def test_track_match_empty_by_default(self):
+        p = _make_posting()
+        row = _posting_to_row(p, "h", "2024-01-01")
+        assert row[COLUMNS.index("Track Match")] == ""
+
+    def test_track_match_value_written(self):
+        from internship_engine.models import ActiveStatus
+
+        p = _make_posting()
+        p = p.model_copy(
+            update={
+                "active_status": ActiveStatus.ACTIVE,
+                "active_reason": "apply button detected",
+                "track_match": "swe|data",
+            }
+        )
+        row = _posting_to_row(p, "h", "2024-01-01")
+        assert row[COLUMNS.index("Status")] == "active"
+        assert row[COLUMNS.index("Status Reason")] == "apply button detected"
+        assert row[COLUMNS.index("Track Match")] == "swe|data"
 
 
 # ---------------------------------------------------------------------------
