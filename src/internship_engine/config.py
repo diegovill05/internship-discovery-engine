@@ -13,7 +13,7 @@ IE_TARGET_CATEGORIES=software,data
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,6 +83,26 @@ class Settings(BaseSettings):
     seen_hashes_path: Path = Field(
         default=Path(".cache/seen_hashes.txt"),
         description="File path used to persist seen posting hashes between runs.",
+    )
+
+    # --- Google Sheets export -----------------------------------------
+    sheet_id: Optional[str] = Field(
+        default=None,
+        description="Google Sheet ID to export postings into (IE_SHEET_ID).",
+    )
+
+    google_service_account_json: Optional[str] = Field(
+        default=None,
+        validation_alias="GOOGLE_SERVICE_ACCOUNT_JSON",
+        description=(
+            "Full JSON string of a Google service account key file "
+            "(env var GOOGLE_SERVICE_ACCOUNT_JSON, no IE_ prefix)."
+        ),
+    )
+
+    sheet_tab: str = Field(
+        default="Postings",
+        description="Name of the worksheet tab to write postings into (IE_SHEET_TAB).",
     )
 
 
