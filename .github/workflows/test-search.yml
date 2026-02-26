@@ -32,7 +32,4 @@ jobs:
             --export sheets \
             --sheet-tab "Sheet1" \
             --track cyber \
-            --only-active \
-            --active-check-max 10 \
-            --keyword "" \
             --max-results 25
