@@ -173,6 +173,10 @@ class TestLocationFilterBypass:
             export="none",
             sheet_id=None,
             sheet_tab=None,
+            track="all",
+            only_active=False,
+            active_check_max=10,
+            drop_unknown_active=False,
         )
 
         mock_source = MagicMock()

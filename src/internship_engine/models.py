@@ -21,6 +21,22 @@ class Category(str, Enum):
     OTHER = "other"
 
 
+class ActiveStatus(str, Enum):
+    """Whether the job posting is still open.
+
+    ACTIVE
+        The page loaded cleanly and shows no "closed" signals.
+    INACTIVE
+        HTTP 404/410, or page contains a known "position filled" message.
+    UNKNOWN
+        Request was blocked (403/429), timed out, or otherwise inconclusive.
+    """
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    UNKNOWN = "unknown"
+
+
 class DatePostedConfidence(str, Enum):
     """Confidence level for the ``date_posted`` field.
 
@@ -70,6 +86,9 @@ class JobPosting(BaseModel):
     source: str = ""
     category: Optional[Category] = None
     is_remote: bool = False
+    active_status: ActiveStatus = ActiveStatus.UNKNOWN
+    active_reason: str = ""
+    track_match: str = ""
 
     # ------------------------------------------------------------------
     # Validators

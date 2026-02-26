@@ -16,7 +16,14 @@ service account's email address (editor access).
 Column order
 ------------
 Added At | Category | Title | Company | Location | Date Posted |
-Date Confidence | Apply URL | Posting URL | Source | Hash
+Date Confidence | Apply URL | Posting URL | Source | Hash |
+Status | Status Reason | Track Match
+
+Auto-migration
+--------------
+If an existing sheet has the 11-column legacy header (before Status/Status Reason/
+Track Match were added), :func:`ensure_header` appends the missing columns rather
+than raising an error.
 """
 
 from __future__ import annotations
@@ -52,6 +59,9 @@ COLUMNS: list[str] = [
     "Posting URL",
     "Source",
     "Hash",
+    "Status",
+    "Status Reason",
+    "Track Match",
 ]
 
 _HASH_COL_INDEX = COLUMNS.index("Hash")  # 0-based
@@ -108,9 +118,14 @@ def build_client_from_env(settings: Settings) -> gspread.Client:
 def ensure_header(worksheet: gspread.Worksheet) -> None:
     """Ensure the first row of *worksheet* contains exactly :data:`COLUMNS`.
 
-    If the sheet is empty, the header is inserted.  If the first row already
-    matches, nothing is done.  If the first row exists but differs, a
-    ``ValueError`` is raised to avoid silently corrupting the sheet.
+    Three behaviours:
+
+    * **Empty sheet** — the full header is inserted as row 1.
+    * **Exact match** — no-op.
+    * **Prefix match** — the existing header is a valid leading subset of
+      :data:`COLUMNS` (e.g. the legacy 11-column layout).  Missing columns are
+      appended to row 1 via individual ``update_cell`` calls (auto-migration).
+    * **Mismatch** — ``ValueError`` is raised.
 
     Parameters
     ----------
@@ -123,13 +138,28 @@ def ensure_header(worksheet: gspread.Worksheet) -> None:
         logger.debug("Inserted header row into empty sheet.")
         return
 
-    if existing[0] == COLUMNS:
+    existing_header = existing[0]
+
+    if existing_header == COLUMNS:
         return  # already correct
+
+    # Auto-migration: append missing columns if existing header is a prefix
+    n = len(existing_header)
+    if 0 < n < len(COLUMNS) and existing_header == COLUMNS[:n]:
+        missing = COLUMNS[n:]
+        for i, col_name in enumerate(missing):
+            worksheet.update_cell(1, n + 1 + i, col_name)
+        logger.info(
+            "Auto-migrated sheet header: appended %d column(s): %s",
+            len(missing),
+            missing,
+        )
+        return
 
     raise ValueError(
         f"Sheet header mismatch.\n"
         f"  Expected: {COLUMNS}\n"
-        f"  Found:    {existing[0]}\n"
+        f"  Found:    {existing_header}\n"
         "Please fix the sheet header or clear the sheet before running."
     )
 
@@ -259,4 +289,7 @@ def _posting_to_row(posting: JobPosting, h: str, added_at: str) -> list[str]:
         posting.posting_url,
         posting.source,
         h,
+        posting.active_status.value,
+        posting.active_reason,
+        posting.track_match,
     ]
