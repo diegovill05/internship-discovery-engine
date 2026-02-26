@@ -24,8 +24,12 @@ jobs:
       - name: Run Brave search test
         env:
           IE_BRAVE_API_KEY: ${{ secrets.IE_BRAVE_API_KEY }}
+          IE_SHEET_ID: ${{ secrets.IE_SHEET_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
         run: |
           internship-engine run \
             --source brave \
+            --export sheets \
+            --sheet-tab "Postings" \
             --keyword "san antonio (intern OR internship) (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com OR site:myworkdayjobs.com)" \
             --max-results 15
