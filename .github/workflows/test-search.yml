@@ -30,6 +30,9 @@ jobs:
           internship-engine run \
             --source brave \
             --export sheets \
-            --sheet-tab "Postings" \
-            --keyword "san antonio (intern OR internship) (site:boards.greenhouse.io OR site:jobs.lever.co OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com OR site:myworkdayjobs.com)" \
-            --max-results 15
+            --sheet-tab "Sheet1" \
+            --track cyber \
+            --only-active \
+            --active-check-max 10 \
+            --keyword "" \
+            --max-results 25
