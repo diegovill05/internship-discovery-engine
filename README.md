@@ -57,14 +57,66 @@ internship-engine run --source google
 internship-engine list-categories
 
 # Run a search (Brave is default)
-internship-engine run --location "New York, NY" --category software
+internship-engine run --location "New York, NY" --track swe
 
 # Use Google instead, with extra options
 internship-engine run --source google --keyword Python --max-results 20
 
 # Filter by recency and exclude remote postings
 internship-engine run --posted-within-days 7 --no-remote
+
+# Interactive wizard
+internship-engine menu
 ```
+
+## Track Filtering
+
+Filter postings to a specific domain so only relevant roles appear:
+
+| Track | Targets |
+|---|---|
+| `swe` | Software engineers, web/mobile developers, DevOps |
+| `cyber` | Cybersecurity, SOC analysts, security engineers |
+| `it` | Help desk, desktop support, IT support, sysadmins |
+| `data` | Data analysts, data scientists, ML engineers, BI |
+| `all` | No filtering — all postings returned (default) |
+
+```bash
+internship-engine run --track swe
+internship-engine run --track cyber --location "Austin, TX"
+```
+
+When `--track` is set and no `--keyword` is given, optimised query strings
+are injected automatically for higher-quality results.
+
+## Active-Posting Check
+
+Skip postings whose page shows a "closed" signal (HTTP 404/410, or phrases
+like "position has been filled", "no longer accepting applications", etc.).
+
+```bash
+# Drop confirmed-closed postings; keep unknown-status (default)
+internship-engine run --track swe --only-active
+
+# Drop both closed AND pages that couldn't be checked (403, timeout)
+internship-engine run --track swe --only-active --drop-unknown-active
+
+# Limit network checks to 5 per run (default: 10)
+internship-engine run --only-active --active-check-max 5
+```
+
+> Pages blocked (403) or rate-limited (429) return `UNKNOWN`, not `INACTIVE`,
+> to avoid false positives.
+
+## Interactive Menu
+
+```bash
+internship-engine menu
+```
+
+Guided prompts for location, track, keywords, source, max results, export
+destination, and active-check preference — then runs the same pipeline as
+`run`.
 
 ## Google Sheets Export
 
@@ -124,7 +176,10 @@ internship-engine run --export sheets --sheet-tab Summer2025
 
 `Added At` | `Category` | `Title` | `Company` | `Location` |
 `Date Posted` | `Date Confidence` | `Apply URL` | `Posting URL` |
-`Source` | `Hash`
+`Source` | `Hash` | `Status` | `Status Reason` | `Track Match`
+
+Existing sheets with the 11-column legacy format are **auto-migrated** —
+the three new columns are appended to the header automatically.
 
 ## Testing
 
