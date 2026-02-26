@@ -5,15 +5,17 @@ Registered as the ``internship-engine`` console script via pyproject.toml.
 Subcommands
 -----------
 run              Fetch, filter, deduplicate, and display new postings.
+menu             Interactive wizard that prompts for options then runs.
 list-categories  Print all recognised category names.
 
 Usage examples
 --------------
 $ internship-engine list-categories
-$ internship-engine run --location "New York, NY" --category software
+$ internship-engine run --location "New York, NY" --track swe
 $ internship-engine run --source brave --keyword Python --max-results 20
-$ internship-engine run --source google --location "San Francisco, CA"
-$ internship-engine run --no-remote --posted-within-days 7
+$ internship-engine run --source google --track cyber --only-active
+$ internship-engine run --no-remote --posted-within-days 7 --export sheets
+$ internship-engine menu
 """
 
 from __future__ import annotations
@@ -131,6 +133,50 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TAB",
         help="Worksheet tab name to write into (overrides IE_SHEET_TAB).",
     )
+    run_parser.add_argument(
+        "--track",
+        choices=["cyber", "it", "swe", "data", "all"],
+        default="all",
+        help=(
+            "Filter postings to a specific domain track "
+            "(cyber/it/swe/data/all). Default: all."
+        ),
+    )
+    run_parser.add_argument(
+        "--only-active",
+        action="store_true",
+        default=False,
+        help=(
+            "Fetch each posting URL and skip postings whose page shows "
+            "a 'closed' signal (404, 410, or known phrases)."
+        ),
+    )
+    run_parser.add_argument(
+        "--active-check-max",
+        type=int,
+        default=10,
+        metavar="N",
+        help=(
+            "Maximum number of postings to active-check per run "
+            "(default: 10). Postings beyond the limit are kept with "
+            "status=unknown."
+        ),
+    )
+    run_parser.add_argument(
+        "--drop-unknown-active",
+        action="store_true",
+        default=False,
+        help=(
+            "When --only-active is set, also drop postings whose active "
+            "status could not be determined (403, timeout, etc.)."
+        ),
+    )
+
+    # --- menu -------------------------------------------------------------
+    subparsers.add_parser(
+        "menu",
+        help="Interactive wizard — prompts for options then runs the pipeline.",
+    )
 
     # --- list-categories --------------------------------------------------
     subparsers.add_parser(
@@ -147,14 +193,21 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """Fetch → extract → filter → deduplicate → print summary."""
+    """Fetch → extract → filter → deduplicate → track → active-check → print."""
     # Lazy imports keep startup fast when other subcommands are used
+    from internship_engine.active_check import ActiveStatus, check_active
     from internship_engine.categorization import categorize
     from internship_engine.config import get_settings
     from internship_engine.deduplication import DuplicateFilter
     from internship_engine.extractor import Extractor
     from internship_engine.location_filter import LocationFilter
     from internship_engine.models import DatePostedConfidence, JobPosting
+    from internship_engine.tracks import (
+        Track,
+        filter_by_track,
+        track_match_label,
+        track_query_terms,
+    )
 
     settings = get_settings()
 
@@ -163,10 +216,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     if source is None:
         return 1  # credential error already printed
 
+    # ── Inject track-specific keywords when no keywords were given ────────
+    track_enum = Track(args.track)
+    effective_keywords = args.keywords or track_query_terms(track_enum)
+
     # ── Fetch raw search results ──────────────────────────────────────────
     raw_results = source.fetch(
         locations=args.locations,
-        keywords=args.keywords,
+        keywords=effective_keywords,
         categories=args.categories,
     )
 
@@ -220,7 +277,37 @@ def cmd_run(args: argparse.Namespace) -> int:
         if args.categories and category.value not in args.categories:
             continue
 
+        # ── Track labelling (always) ──────────────────────────────────────
+        label = track_match_label(posting)
+        posting = posting.model_copy(update={"track_match": label})
+
         postings.append(posting)
+
+    # ── Track filter (post-loop, single pass) ─────────────────────────────
+    postings = filter_by_track(postings, track_enum)
+
+    # ── Active-check (optional, capped at --active-check-max) ────────────
+    if args.only_active and postings:
+        limit = min(args.active_check_max, len(postings))
+        checked: list[JobPosting] = []
+
+        for posting in postings[:limit]:
+            result = check_active(posting.posting_url)
+            posting = posting.model_copy(
+                update={
+                    "active_status": result.status,
+                    "active_reason": result.reason,
+                }
+            )
+            if result.status == ActiveStatus.INACTIVE:
+                continue
+            if result.status == ActiveStatus.UNKNOWN and args.drop_unknown_active:
+                continue
+            checked.append(posting)
+
+        # Postings beyond the limit are kept with their default UNKNOWN status
+        checked.extend(postings[limit:])
+        postings = checked
 
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
@@ -373,6 +460,86 @@ def _print_summary(postings: list) -> None:
         print()
 
 
+def cmd_menu(_args: argparse.Namespace) -> int:
+    """Interactive wizard — prompts for options and then calls :func:`cmd_run`."""
+    _PRESET_CITIES = [
+        "New York, NY",
+        "Austin, TX",
+        "San Francisco, CA",
+        "Remote",
+    ]
+    _TRACKS = ["cyber", "it", "swe", "data", "all"]
+
+    print("\n=== Internship Discovery Engine — Interactive Menu ===\n")
+
+    # ── Location ──────────────────────────────────────────────────────────
+    print("Location presets:")
+    for i, city in enumerate(_PRESET_CITIES, 1):
+        print(f"  {i}) {city}")
+    print("  c) Enter custom / comma-separated")
+    loc_raw = input("Choose [1-4 / c] (blank = all locations): ").strip()
+
+    if loc_raw.isdigit() and 1 <= int(loc_raw) <= len(_PRESET_CITIES):
+        locations = [_PRESET_CITIES[int(loc_raw) - 1]]
+    elif loc_raw.lower() == "c":
+        custom = input("  Location(s), comma-separated: ").strip()
+        locations = [s.strip() for s in custom.split(",") if s.strip()]
+    else:
+        locations = []
+
+    # ── Track ─────────────────────────────────────────────────────────────
+    track_raw = input(f"Track [{'/'.join(_TRACKS)}] (default: all): ").strip().lower()
+    track = track_raw if track_raw in _TRACKS else "all"
+
+    # ── Keyword ───────────────────────────────────────────────────────────
+    kw_raw = input("Extra keyword (blank to skip): ").strip()
+    keywords = [kw_raw] if kw_raw else []
+
+    # ── Max results ───────────────────────────────────────────────────────
+    max_raw = input("Max results [10]: ").strip()
+    try:
+        max_results = int(max_raw) if max_raw else 10
+    except ValueError:
+        max_results = 10
+
+    # ── Source ────────────────────────────────────────────────────────────
+    src_raw = input("Source [brave/google] (default: brave): ").strip().lower()
+    source = src_raw if src_raw in ("brave", "google") else "brave"
+
+    # ── Export ────────────────────────────────────────────────────────────
+    exp_raw = input("Export to Google Sheets? [y/N]: ").strip().lower()
+    export = "sheets" if exp_raw in ("y", "yes") else "none"
+
+    # ── Active check ──────────────────────────────────────────────────────
+    active_raw = input("Only show active postings? [y/N]: ").strip().lower()
+    only_active = active_raw in ("y", "yes")
+
+    # ── Summary + dispatch ────────────────────────────────────────────────
+    loc_label = ", ".join(locations) if locations else "all"
+    print(
+        f"\nRunning: source={source}  track={track}"
+        f"  locations=[{loc_label}]  max={max_results}\n"
+    )
+
+    run_args = argparse.Namespace(
+        source=source,
+        locations=locations,
+        no_remote=False,
+        keywords=keywords,
+        categories=[],
+        max_results=max_results,
+        posted_within_days=None,
+        export=export,
+        sheet_id=None,
+        sheet_tab=None,
+        track=track,
+        only_active=only_active,
+        active_check_max=10,
+        drop_unknown_active=False,
+    )
+    return cmd_run(run_args)
+
+
 def cmd_list_categories(_args: argparse.Namespace) -> int:
     """Print all :class:`~internship_engine.models.Category` values."""
     from internship_engine.models import Category
@@ -388,6 +555,7 @@ def cmd_list_categories(_args: argparse.Namespace) -> int:
 
 _HANDLERS = {
     "run": cmd_run,
+    "menu": cmd_menu,
     "list-categories": cmd_list_categories,
 }
 
