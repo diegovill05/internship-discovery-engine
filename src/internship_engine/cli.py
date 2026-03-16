@@ -21,6 +21,7 @@ $ internship-engine menu
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import date, timedelta
 
@@ -42,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Enable verbose logging (DEBUG level). Default shows WARNING+.",
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -198,7 +206,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     from internship_engine.active_check import ActiveStatus, check_active
     from internship_engine.categorization import categorize
     from internship_engine.config import get_settings
-    from internship_engine.deduplication import DuplicateFilter
+    from internship_engine.deduplication import (
+        DuplicateFilter,
+        load_hashes,
+        save_hashes,
+    )
     from internship_engine.extractor import Extractor
     from internship_engine.location_filter import LocationFilter
     from internship_engine.models import DatePostedConfidence, JobPosting
@@ -237,7 +249,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         allowed_locations=tuple(args.locations),
         include_remote=not args.no_remote,
     )
-    dup_filter = DuplicateFilter()
+    initial_hashes = load_hashes(settings.seen_hashes_path)
+    dup_filter = DuplicateFilter(initial_hashes=initial_hashes)
     cutoff: date | None = (
         date.today() - timedelta(days=args.posted_within_days)
         if args.posted_within_days is not None
@@ -308,6 +321,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Postings beyond the limit are kept with their default UNKNOWN status
         checked.extend(postings[limit:])
         postings = checked
+
+    # ── Persist dedup hashes for next run ─────────────────────────────────
+    save_hashes(settings.seen_hashes_path, dup_filter.hashes())
 
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
@@ -536,6 +552,7 @@ def cmd_menu(_args: argparse.Namespace) -> int:
         only_active=only_active,
         active_check_max=10,
         drop_unknown_active=False,
+        verbose=False,
     )
     return cmd_run(run_args)
 
@@ -564,6 +581,11 @@ def main(argv: list[str] | None = None) -> None:
     """Parse *argv* and dispatch to the appropriate command handler."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s: %(name)s: %(message)s",
+    )
 
     handler = _HANDLERS.get(args.command)
     if handler is None:

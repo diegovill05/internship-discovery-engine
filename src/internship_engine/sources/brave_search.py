@@ -67,6 +67,26 @@ class BraveSearchConfig:
 # ---------------------------------------------------------------------------
 
 
+def _freshness_value(days: int | None) -> str | None:
+    """Map a *posted_within_days* integer to a Brave ``freshness`` param.
+
+    Brave supports: ``pd`` (past day), ``pw`` (past week),
+    ``pm`` (past month), ``py`` (past year).  Returns the tightest
+    bucket that fully covers *days*, or *None* when no filter applies.
+    """
+    if days is None:
+        return None
+    if days <= 1:
+        return "pd"
+    if days <= 7:
+        return "pw"
+    if days <= 30:
+        return "pm"
+    if days <= 365:
+        return "py"
+    return None
+
+
 class BraveSearchSource:
     """Fetches raw search results from the Brave Web Search API.
 
@@ -164,6 +184,9 @@ class BraveSearchSource:
         }
         if offset > 0:
             params["offset"] = offset
+        freshness = _freshness_value(self._config.posted_within_days)
+        if freshness:
+            params["freshness"] = freshness
 
         backoff = _INITIAL_BACKOFF
         for attempt in range(_MAX_RETRIES + 1):

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from internship_engine.deduplication import DuplicateFilter, compute_hash
+from internship_engine.deduplication import (
+    DuplicateFilter,
+    compute_hash,
+    load_hashes,
+    save_hashes,
+)
 from internship_engine.models import JobPosting
 
 # ---------------------------------------------------------------------------
@@ -222,3 +227,52 @@ class TestDuplicateFilterHashes:
         snapshot_before = df.hashes()
         df.is_new(_posting())
         assert snapshot_before == frozenset()  # snapshot unchanged
+
+
+# ---------------------------------------------------------------------------
+# load_hashes / save_hashes — file persistence
+# ---------------------------------------------------------------------------
+
+
+class TestLoadHashes:
+    def test_returns_empty_set_for_missing_file(self, tmp_path):
+        assert load_hashes(tmp_path / "nonexistent.txt") == set()
+
+    def test_loads_hashes_from_file(self, tmp_path):
+        h1 = "a" * 64
+        h2 = "b" * 64
+        f = tmp_path / "hashes.txt"
+        f.write_text(f"{h1}\n{h2}\n")
+        result = load_hashes(f)
+        assert result == {h1, h2}
+
+    def test_skips_blank_lines(self, tmp_path):
+        h = "c" * 64
+        f = tmp_path / "hashes.txt"
+        f.write_text(f"\n{h}\n\n")
+        assert load_hashes(f) == {h}
+
+    def test_skips_non_64_char_lines(self, tmp_path):
+        f = tmp_path / "hashes.txt"
+        f.write_text("short\nnotahash\n" + "d" * 64 + "\n")
+        assert load_hashes(f) == {"d" * 64}
+
+
+class TestSaveHashes:
+    def test_creates_file(self, tmp_path):
+        f = tmp_path / "hashes.txt"
+        save_hashes(f, frozenset({"a" * 64}))
+        assert f.is_file()
+        assert ("a" * 64) in f.read_text()
+
+    def test_creates_parent_dirs(self, tmp_path):
+        f = tmp_path / "sub" / "dir" / "hashes.txt"
+        save_hashes(f, frozenset({"b" * 64}))
+        assert f.is_file()
+
+    def test_round_trip(self, tmp_path):
+        f = tmp_path / "hashes.txt"
+        original = frozenset({"a" * 64, "b" * 64, "c" * 64})
+        save_hashes(f, original)
+        loaded = load_hashes(f)
+        assert loaded == set(original)

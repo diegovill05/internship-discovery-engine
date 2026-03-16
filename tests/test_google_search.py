@@ -117,6 +117,20 @@ class TestBuildQueries:
         for q in build_queries(["NYC"], ["Go"], ["software"]):
             assert isinstance(q, str)
 
+    def test_default_terms_skipped_when_keywords_provided(self):
+        """When keywords are supplied, default terms should not be appended."""
+        queries = build_queries([], ["cybersecurity"], [])
+        q = queries[0]
+        assert "cybersecurity" in q
+        assert "internship" not in q
+        assert "intern" not in q
+
+    def test_default_terms_added_when_no_keywords(self):
+        """When no keywords are given, default terms are appended."""
+        queries = build_queries([], [], [])
+        q = queries[0].lower()
+        assert "internship" in q or "intern" in q
+
 
 # ---------------------------------------------------------------------------
 # GoogleSearchSource.fetch — injected session

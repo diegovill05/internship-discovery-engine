@@ -111,7 +111,10 @@ def build_queries(
         base_tokens.extend(keywords)
     if categories:
         base_tokens.extend(categories)
-    base_tokens.extend(effective_terms)
+    # Only append default internship terms when no keywords were supplied;
+    # track query templates already include their own intern/internship tokens.
+    if not keywords:
+        base_tokens.extend(effective_terms)
 
     base = " ".join(base_tokens)
 

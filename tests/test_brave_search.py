@@ -15,6 +15,7 @@ from internship_engine.sources.brave_search import (
     _PAGE_SIZE,
     BraveSearchConfig,
     BraveSearchSource,
+    _freshness_value,
 )
 from internship_engine.sources.google_search import RawSearchResult
 
@@ -313,3 +314,58 @@ class TestBraveSearchConfig:
     def test_default_posted_within_days_is_none(self):
         cfg = BraveSearchConfig(api_key="k")
         assert cfg.posted_within_days is None
+
+
+# ---------------------------------------------------------------------------
+# _freshness_value mapping
+# ---------------------------------------------------------------------------
+
+
+class TestFreshnessValue:
+    def test_none_returns_none(self):
+        assert _freshness_value(None) is None
+
+    def test_one_day(self):
+        assert _freshness_value(1) == "pd"
+
+    def test_seven_days(self):
+        assert _freshness_value(7) == "pw"
+
+    def test_fourteen_days(self):
+        assert _freshness_value(14) == "pm"
+
+    def test_thirty_days(self):
+        assert _freshness_value(30) == "pm"
+
+    def test_365_days(self):
+        assert _freshness_value(365) == "py"
+
+    def test_large_value_returns_none(self):
+        assert _freshness_value(500) is None
+
+
+# ---------------------------------------------------------------------------
+# Freshness parameter sent to API
+# ---------------------------------------------------------------------------
+
+
+class TestBraveFreshnessParam:
+    def test_freshness_param_sent_when_posted_within_days_set(self):
+        cfg = BraveSearchConfig(api_key="k", max_results=3, posted_within_days=7)
+        session = _mock_session(_make_web_results(3))
+        source = BraveSearchSource(cfg, session=session)
+        source.fetch([], [], [])
+        params = session.get.call_args.kwargs.get(
+            "params", session.get.call_args[1].get("params", {})
+        )
+        assert params.get("freshness") == "pw"
+
+    def test_no_freshness_param_when_posted_within_days_none(self):
+        cfg = BraveSearchConfig(api_key="k", max_results=3)
+        session = _mock_session(_make_web_results(3))
+        source = BraveSearchSource(cfg, session=session)
+        source.fetch([], [], [])
+        params = session.get.call_args.kwargs.get(
+            "params", session.get.call_args[1].get("params", {})
+        )
+        assert "freshness" not in params

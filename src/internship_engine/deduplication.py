@@ -15,8 +15,12 @@ Typical usage
 from __future__ import annotations
 
 import hashlib
+import logging
+from pathlib import Path
 
 from internship_engine.models import JobPosting
+
+logger = logging.getLogger(__name__)
 
 # Separator unlikely to appear in normal field values
 _SEP = "\x00"
@@ -108,3 +112,44 @@ class DuplicateFilter:
         Useful for serialising the filter state between runs.
         """
         return frozenset(self._seen)
+
+
+# ---------------------------------------------------------------------------
+# File-based persistence
+# ---------------------------------------------------------------------------
+
+
+def load_hashes(path: Path) -> set[str]:
+    """Read previously-seen hashes from *path* (one hex digest per line).
+
+    Returns an empty set when the file does not exist or is unreadable.
+    Blank lines and lines that are not 64-character hex strings are skipped.
+    """
+    if not path.is_file():
+        return set()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not read hash file %s: %s", path, exc)
+        return set()
+    hashes: set[str] = set()
+    for line in text.splitlines():
+        h = line.strip()
+        if len(h) == 64:
+            hashes.add(h)
+    return hashes
+
+
+def save_hashes(path: Path, hashes: frozenset[str] | set[str]) -> None:
+    """Write *hashes* to *path*, one hex digest per line.
+
+    Creates parent directories if they do not exist.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(sorted(hashes)) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        logger.warning("Could not write hash file %s: %s", path, exc)

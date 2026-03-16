@@ -228,14 +228,14 @@ class TestUpsertRows:
         ws = _fake_worksheet([COLUMNS])  # header only, no data rows
         count = upsert_rows(ws, [p], added_at=date(2024, 6, 1))
         assert count == 1
-        ws.append_row.assert_called_once()
+        ws.append_rows.assert_called_once()
 
     def test_appended_row_has_correct_hash(self):
         p = _make_posting()
         ws = _fake_worksheet([COLUMNS])
         upsert_rows(ws, [p], added_at=date(2024, 6, 1))
-        appended_row = ws.append_row.call_args[0][0]
-        assert appended_row[_HASH_COL_INDEX] == compute_hash(p)
+        appended_rows = ws.append_rows.call_args[0][0]
+        assert appended_rows[0][_HASH_COL_INDEX] == compute_hash(p)
 
     def test_skips_duplicate_hash(self):
         p = _make_posting()
@@ -244,7 +244,7 @@ class TestUpsertRows:
         ws = _fake_worksheet(existing)
         count = upsert_rows(ws, [p], added_at=date(2024, 6, 2))
         assert count == 0
-        ws.append_row.assert_not_called()
+        ws.append_rows.assert_not_called()
 
     def test_appends_only_new_among_mixed_batch(self):
         p1 = _make_posting(title="Old Intern", posting_url="https://ex.com/1")
@@ -254,9 +254,10 @@ class TestUpsertRows:
         ws = _fake_worksheet(existing)
         count = upsert_rows(ws, [p1, p2], added_at=date(2024, 6, 1))
         assert count == 1
-        ws.append_row.assert_called_once()
-        appended_row = ws.append_row.call_args[0][0]
-        assert appended_row[_HASH_COL_INDEX] == compute_hash(p2)
+        ws.append_rows.assert_called_once()
+        appended_rows = ws.append_rows.call_args[0][0]
+        assert len(appended_rows) == 1
+        assert appended_rows[0][_HASH_COL_INDEX] == compute_hash(p2)
 
     def test_no_duplicates_within_same_batch(self):
         """The same posting passed twice must only be appended once."""
@@ -269,21 +270,21 @@ class TestUpsertRows:
         ws = _fake_worksheet([COLUMNS])
         count = upsert_rows(ws, [], added_at=date(2024, 6, 1))
         assert count == 0
-        ws.append_row.assert_not_called()
+        ws.append_rows.assert_not_called()
 
     def test_added_at_uses_today_when_not_supplied(self):
         p = _make_posting()
         ws = _fake_worksheet([COLUMNS])
         today = date.today().isoformat()
         upsert_rows(ws, [p])
-        appended_row = ws.append_row.call_args[0][0]
-        assert appended_row[COLUMNS.index("Added At")] == today
+        appended_rows = ws.append_rows.call_args[0][0]
+        assert appended_rows[0][COLUMNS.index("Added At")] == today
 
-    def test_append_row_uses_user_entered_input(self):
+    def test_append_rows_uses_user_entered_input(self):
         p = _make_posting()
         ws = _fake_worksheet([COLUMNS])
         upsert_rows(ws, [p], added_at=date(2024, 6, 1))
-        _, kwargs = ws.append_row.call_args
+        _, kwargs = ws.append_rows.call_args
         assert kwargs.get("value_input_option") == "USER_ENTERED"
 
     def test_returns_count_for_multiple_new_postings(self):
@@ -292,6 +293,8 @@ class TestUpsertRows:
         ws = _fake_worksheet([COLUMNS])
         count = upsert_rows(ws, [p1, p2], added_at=date(2024, 6, 1))
         assert count == 2
+        appended_rows = ws.append_rows.call_args[0][0]
+        assert len(appended_rows) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -373,7 +376,7 @@ class TestExportPostings:
             count = export_postings(settings, [p])
 
         assert count == 1
-        ws.append_row.assert_called_once()
+        ws.append_rows.assert_called_once()
 
     def test_falls_back_to_settings_sheet_id(self):
         ws = _fake_worksheet([COLUMNS])
