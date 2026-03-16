@@ -8,6 +8,8 @@ the logic deterministic and easy to extend.
 
 from __future__ import annotations
 
+import re
+
 from internship_engine.models import Category, JobPosting
 
 # ---------------------------------------------------------------------------
@@ -88,10 +90,21 @@ _CATEGORY_KEYWORDS: dict[Category, list[str]] = {
         "web developer",
         "api developer",
         "infrastructure engineer",
-        "developer",
-        "engineer",
     ],
 }
+
+
+def _kw_match(keyword: str, text: str) -> bool:
+    """Check whether *keyword* appears in *text* as a meaningful match.
+
+    * Single-word keywords use ``\\b`` word-boundary anchors so that e.g.
+      ``"data"`` does **not** match inside ``"candidate"``.
+    * Multi-word phrases (containing a space) use plain substring matching,
+      which is already precise enough.
+    """
+    if " " in keyword:
+        return keyword in text
+    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
 
 
 def categorize(posting: JobPosting) -> Category:
@@ -105,7 +118,7 @@ def categorize(posting: JobPosting) -> Category:
 
     for category, keywords in _CATEGORY_KEYWORDS.items():
         for kw in keywords:
-            if kw in haystack:
+            if _kw_match(kw, haystack):
                 return category
 
     return Category.OTHER

@@ -117,3 +117,61 @@ class TestCategorizeEdgeCases:
     def test_empty_title_and_description(self):
         p = _posting("", description="")
         assert categorize(p) == Category.OTHER
+
+
+# ---------------------------------------------------------------------------
+# Word-boundary & overbroad keyword regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestCategorizeFalsePositives:
+    """Ensure classification precision improvements prevent known false positives."""
+
+    def test_chemical_engineer_not_software(self):
+        """'Chemical Engineer Intern' must NOT be categorized as SOFTWARE."""
+        assert categorize(_posting("Chemical Engineer Intern")) == Category.OTHER
+
+    def test_real_estate_developer_not_software(self):
+        """'Real Estate Developer Intern' must NOT be categorized as SOFTWARE."""
+        assert categorize(_posting("Real Estate Developer Intern")) == Category.OTHER
+
+    def test_civil_engineer_not_software(self):
+        assert categorize(_posting("Civil Engineer Intern")) == Category.OTHER
+
+    def test_mechanical_engineer_not_software(self):
+        assert categorize(_posting("Mechanical Engineer Intern")) == Category.OTHER
+
+    def test_sre_not_matched_in_desire(self):
+        """'sre' must not match inside 'desire'."""
+        p = _posting("HR Intern", description="We desire a motivated candidate")
+        assert categorize(p) != Category.SOFTWARE
+
+    def test_quant_not_matched_in_quantify(self):
+        """'quant' must not match inside 'quantify'."""
+        p = _posting("Lab Intern", description="quantify the experimental results")
+        assert categorize(p) != Category.FINANCE
+
+    def test_data_not_matched_in_candidate(self):
+        """'data' must not match inside 'candidate'."""
+        p = _posting("HR Intern", description="candidate screening process")
+        assert categorize(p) == Category.OTHER
+
+    def test_design_not_matched_in_designated(self):
+        """'design' must not match inside 'designated'."""
+        p = _posting("Admin Intern", description="designated parking area")
+        assert categorize(p) == Category.OTHER
+
+    def test_software_engineer_still_software(self):
+        """Multi-word 'software engineer' must still match SOFTWARE."""
+        assert categorize(_posting("Software Engineer Intern")) == Category.SOFTWARE
+
+    def test_web_developer_still_software(self):
+        """Multi-word 'web developer' must still match SOFTWARE."""
+        assert categorize(_posting("Web Developer Intern")) == Category.SOFTWARE
+
+    def test_backend_still_software(self):
+        """'backend' as standalone keyword still matches SOFTWARE."""
+        assert categorize(_posting("Backend Intern")) == Category.SOFTWARE
+
+    def test_devops_still_software(self):
+        assert categorize(_posting("DevOps Intern")) == Category.SOFTWARE

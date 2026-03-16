@@ -9,6 +9,7 @@ postings meeting the minimum threshold are kept.
 
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -174,6 +175,24 @@ _PENALTY: int = 3  # points deducted per negative keyword hit
 
 
 # ---------------------------------------------------------------------------
+# Keyword matching helper
+# ---------------------------------------------------------------------------
+
+
+def _kw_match(keyword: str, text: str) -> bool:
+    """Check whether *keyword* appears in *text* as a meaningful match.
+
+    * Single-word keywords use ``\\b`` word-boundary anchors so that e.g.
+      ``"data"`` does **not** match inside ``"candidate"``.
+    * Multi-word phrases (containing a space) use plain substring matching,
+      which is already precise enough.
+    """
+    if " " in keyword:
+        return keyword in text
+    return re.search(rf"\b{re.escape(keyword)}\b", text) is not None
+
+
+# ---------------------------------------------------------------------------
 # Scoring
 # ---------------------------------------------------------------------------
 
@@ -194,19 +213,19 @@ def score_track(posting: JobPosting, track: Track) -> int:
 
     score = 0
     for kw in kws.get("strong", []):
-        if kw in title:
+        if _kw_match(kw, title):
             score += 10
-        elif kw in desc:
+        elif _kw_match(kw, desc):
             score += 5
 
     for kw in kws.get("weak", []):
-        if kw in title:
+        if _kw_match(kw, title):
             score += 3
-        elif kw in desc:
+        elif _kw_match(kw, desc):
             score += 1
 
     for kw in _NEGATIVE_KEYWORDS:
-        if kw in full_text:
+        if _kw_match(kw, full_text):
             score -= _PENALTY
 
     return max(0, score)
