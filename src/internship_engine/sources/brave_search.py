@@ -121,6 +121,7 @@ class BraveSearchSource:
         locations: list[str],
         keywords: list[str],
         categories: list[str],
+        ats_domains: dict[str, list[str]] | None = None,
     ) -> list[RawSearchResult]:
         """Run queries and return deduplicated search results.
 
@@ -128,7 +129,9 @@ class BraveSearchSource:
         :meth:`~internship_engine.sources.google_search.GoogleSearchSource.fetch`
         so both providers are interchangeable from the CLI pipeline.
         """
-        queries = build_queries(locations, keywords, categories)
+        queries = build_queries(
+            locations, keywords, categories, ats_domains=ats_domains
+        )
 
         seen_urls: set[str] = set()
         results: list[RawSearchResult] = []

@@ -134,6 +134,29 @@ class TestBraveSearchSourceFetch:
         source.fetch(["New York", "Austin", "Boston"], [], [])
         assert session.get.call_count >= 3
 
+    def test_ats_domains_produces_more_queries(self):
+        """When ats_domains is passed, more GET requests are made."""
+        ats = {"greenhouse": ["boards.greenhouse.io"]}
+        session = _mock_session(_make_web_results(1))
+        source = BraveSearchSource(_config(max_results=50), session=session)
+        source.fetch([], [], [])
+        calls_without = session.get.call_count
+
+        session.reset_mock()
+        source.fetch([], [], [], ats_domains=ats)
+        calls_with = session.get.call_count
+
+        assert calls_with > calls_without
+
+    def test_ats_domains_none_unchanged_behavior(self):
+        """ats_domains=None should behave identically to no argument."""
+        session = _mock_session(_make_web_results(3))
+        source = BraveSearchSource(_config(), session=session)
+        r1 = source.fetch([], [], [])
+        session.reset_mock()
+        r2 = source.fetch([], [], [], ats_domains=None)
+        assert len(r1) == len(r2)
+
 
 # ---------------------------------------------------------------------------
 # Pagination

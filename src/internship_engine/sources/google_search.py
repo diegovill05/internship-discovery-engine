@@ -35,6 +35,15 @@ logger = logging.getLogger(__name__)
 # Default terms appended to every query so results are internship-focused.
 _DEFAULT_TERMS: list[str] = ["internship", "intern", "co-op"]
 
+# ATS platforms targeted for higher-quality job-posting discovery.
+# Mapping of short name → list of site: domain patterns.
+ATS_DOMAINS: dict[str, list[str]] = {
+    "workday": ["*.myworkdayjobs.com"],
+    "greenhouse": ["boards.greenhouse.io"],
+    "lever": ["jobs.lever.co"],
+    "smartrecruiters": ["jobs.smartrecruiters.com"],
+}
+
 # Google Custom Search API endpoint
 _CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
@@ -77,13 +86,18 @@ def build_queries(
     keywords: list[str],
     categories: list[str],
     terms: list[str] | None = None,
+    ats_domains: dict[str, list[str]] | None = None,
 ) -> list[str]:
-    """Return a list of Google search query strings.
+    """Return a list of search query strings in priority order.
 
-    One query is produced per location (or a single query when
-    ``locations`` is empty).  Each query has the form::
+    When *ats_domains* is provided, ATS-site-restricted queries are
+    emitted **first** (one per domain per location), followed by generic
+    queries.  This gives ATS results priority while keeping a generic
+    fallback.
 
-        [keywords] [categories] [terms] [location]
+    Each query has the form::
+
+        [keywords] [categories] [terms] [location] [site:domain]
 
     Parameters
     ----------
@@ -97,12 +111,16 @@ def build_queries(
     terms:
         Internship / co-op terms.  Defaults to ``["internship", "intern"]``
         when *None*.
+    ats_domains:
+        Optional mapping of platform name → list of ``site:`` domain
+        patterns (e.g. ``{"workday": ["*.myworkdayjobs.com"]}``).
+        When provided, site-restricted queries are prepended.
 
     Returns
     -------
     list[str]
-        One query string per location, or a single string when no locations
-        are given.  Never returns an empty list.
+        ATS-targeted queries (if any) followed by generic queries.
+        Never returns an empty list.
     """
     effective_terms = terms if terms is not None else _DEFAULT_TERMS[:2]
 
@@ -118,10 +136,23 @@ def build_queries(
 
     base = " ".join(base_tokens)
 
+    # Build location-expanded generic queries
     if not locations:
-        return [base]
+        generic = [base]
+    else:
+        generic = [f"{base} {loc}" for loc in locations]
 
-    return [f"{base} {loc}" for loc in locations]
+    if not ats_domains:
+        return generic
+
+    # Build ATS-targeted queries: one per domain per generic query
+    ats_queries: list[str] = []
+    for domains in ats_domains.values():
+        for domain in domains:
+            for g in generic:
+                ats_queries.append(f"{g} site:{domain}")
+
+    return ats_queries + generic
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +190,7 @@ class GoogleSearchSource:
         locations: list[str],
         keywords: list[str],
         categories: list[str],
+        ats_domains: dict[str, list[str]] | None = None,
     ) -> list[RawSearchResult]:
         """Run queries and return deduplicated search results.
 
@@ -170,6 +202,8 @@ class GoogleSearchSource:
             Free-form keyword tokens included in every query.
         categories:
             Category names included in every query.
+        ats_domains:
+            Optional ATS domain mapping passed to :func:`build_queries`.
 
         Returns
         -------
@@ -177,7 +211,9 @@ class GoogleSearchSource:
             Unique results across all queries, capped at
             ``config.max_results`` total entries.
         """
-        queries = build_queries(locations, keywords, categories)
+        queries = build_queries(
+            locations, keywords, categories, ats_domains=ats_domains
+        )
 
         seen_urls: set[str] = set()
         results: list[RawSearchResult] = []

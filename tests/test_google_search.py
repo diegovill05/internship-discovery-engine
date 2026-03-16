@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from internship_engine.sources.google_search import (
+    ATS_DOMAINS,
     GoogleSearchConfig,
     GoogleSearchSource,
     RawSearchResult,
@@ -133,6 +134,77 @@ class TestBuildQueries:
 
 
 # ---------------------------------------------------------------------------
+# build_queries — ATS domain targeting
+# ---------------------------------------------------------------------------
+
+
+_TINY_ATS: dict[str, list[str]] = {
+    "greenhouse": ["boards.greenhouse.io"],
+    "lever": ["jobs.lever.co"],
+}
+
+
+class TestBuildQueriesAts:
+    def test_ats_none_returns_only_generic(self):
+        queries = build_queries([], [], [], ats_domains=None)
+        assert len(queries) == 1
+        assert "site:" not in queries[0]
+
+    def test_ats_empty_dict_returns_only_generic(self):
+        queries = build_queries([], [], [], ats_domains={})
+        assert len(queries) == 1
+        assert "site:" not in queries[0]
+
+    def test_ats_queries_prepended_before_generic(self):
+        queries = build_queries([], [], [], ats_domains=_TINY_ATS)
+        ats_qs = [q for q in queries if "site:" in q]
+        generic_qs = [q for q in queries if "site:" not in q]
+        assert len(ats_qs) == 2  # one per domain
+        assert len(generic_qs) == 1
+        # ATS must come first
+        first_ats_idx = queries.index(ats_qs[0])
+        first_generic_idx = queries.index(generic_qs[0])
+        assert first_ats_idx < first_generic_idx
+
+    def test_each_ats_query_contains_site_operator(self):
+        queries = build_queries([], [], [], ats_domains=_TINY_ATS)
+        ats_qs = [q for q in queries if "site:" in q]
+        domains = {"boards.greenhouse.io", "jobs.lever.co"}
+        for q in ats_qs:
+            assert any(f"site:{d}" in q for d in domains)
+
+    def test_ats_queries_include_base_terms(self):
+        queries = build_queries([], [], [], ats_domains=_TINY_ATS)
+        for q in queries:
+            # All queries should have default terms (no keywords given)
+            assert "internship" in q.lower() or "intern" in q.lower()
+
+    def test_ats_with_locations_produces_cross_product(self):
+        queries = build_queries(
+            ["NYC", "Austin"], [], [], ats_domains=_TINY_ATS
+        )
+        ats_qs = [q for q in queries if "site:" in q]
+        generic_qs = [q for q in queries if "site:" not in q]
+        # 2 domains × 2 locations = 4 ATS queries
+        assert len(ats_qs) == 4
+        # 2 generic (one per location)
+        assert len(generic_qs) == 2
+
+    def test_ats_with_keywords_preserves_keywords(self):
+        queries = build_queries(
+            [], ["cybersecurity"], [], ats_domains=_TINY_ATS
+        )
+        for q in queries:
+            assert "cybersecurity" in q
+
+    def test_ats_domains_constant_has_expected_platforms(self):
+        assert "workday" in ATS_DOMAINS
+        assert "greenhouse" in ATS_DOMAINS
+        assert "lever" in ATS_DOMAINS
+        assert "smartrecruiters" in ATS_DOMAINS
+
+
+# ---------------------------------------------------------------------------
 # GoogleSearchSource.fetch — injected session
 # ---------------------------------------------------------------------------
 
@@ -205,6 +277,29 @@ class TestGoogleSearchSourceFetch:
         bad_items = [{"title": "No link", "snippet": "..."}]  # missing "link"
         source = GoogleSearchSource(_config(), session=_mock_session(bad_items))
         assert source.fetch([], [], []) == []
+
+    def test_ats_domains_produces_more_queries(self):
+        """When ats_domains is passed, more GET requests are made."""
+        session = _mock_session(_make_items(1))
+        source = GoogleSearchSource(_config(max_results=50), session=session)
+        # Without ATS: 1 query → 1 GET
+        source.fetch([], [], [])
+        calls_without = session.get.call_count
+
+        session.reset_mock()
+        source.fetch([], [], [], ats_domains=_TINY_ATS)
+        calls_with = session.get.call_count
+
+        assert calls_with > calls_without
+
+    def test_ats_domains_none_unchanged_behavior(self):
+        """ats_domains=None should behave identically to no argument."""
+        session = _mock_session(_make_items(3))
+        source = GoogleSearchSource(_config(), session=session)
+        r1 = source.fetch([], [], [])
+        session.reset_mock()
+        r2 = source.fetch([], [], [], ats_domains=None)
+        assert len(r1) == len(r2)
 
 
 # ---------------------------------------------------------------------------

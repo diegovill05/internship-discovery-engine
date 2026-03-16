@@ -177,6 +177,7 @@ class TestLocationFilterBypass:
             only_active=False,
             active_check_max=10,
             drop_unknown_active=False,
+            no_ats=True,
         )
 
         mock_source = MagicMock()

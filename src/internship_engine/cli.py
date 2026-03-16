@@ -151,6 +151,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
+        "--no-ats",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable ATS-targeted queries (Workday, Greenhouse, Lever, "
+            "SmartRecruiters). By default, site-restricted queries for "
+            "known ATS platforms are run before generic queries."
+        ),
+    )
+    run_parser.add_argument(
         "--only-active",
         action="store_true",
         default=False,
@@ -232,11 +242,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     track_enum = Track(args.track)
     effective_keywords = args.keywords or track_query_terms(track_enum)
 
+    # ── Resolve ATS targeting ─────────────────────────────────────────────
+    from internship_engine.sources.google_search import ATS_DOMAINS
+
+    ats = None if args.no_ats else ATS_DOMAINS
+
     # ── Fetch raw search results ──────────────────────────────────────────
     raw_results = source.fetch(
         locations=args.locations,
         keywords=effective_keywords,
         categories=args.categories,
+        ats_domains=ats,
     )
 
     if not raw_results:
@@ -552,6 +568,7 @@ def cmd_menu(_args: argparse.Namespace) -> int:
         only_active=only_active,
         active_check_max=10,
         drop_unknown_active=False,
+        no_ats=False,
         verbose=False,
     )
     return cmd_run(run_args)
