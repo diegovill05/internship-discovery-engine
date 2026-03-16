@@ -290,8 +290,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         ):
             continue
 
-        # ── Location filter (skip for blocked postings — location unknown) ─
-        if not ext.blocked and not loc_filter.matches(posting):
+        # ── Location filter (skip when location is unknown — blocked or
+        #    empty extraction where we fell back to "Unknown") ──────────
+        location_unknown = ext.blocked or posting.location == "Unknown"
+        if not location_unknown and not loc_filter.matches(posting):
             continue
 
         # ── Deduplication ─────────────────────────────────────────────────
@@ -354,17 +356,27 @@ def cmd_run(args: argparse.Namespace) -> int:
 def _make_posting(result, ext, source_name: str):
     """Build a :class:`~internship_engine.models.JobPosting` from a search result.
 
-    When *ext.blocked* is True (page inaccessible / HTTP 403), the posting is
-    populated from the raw search-result metadata so the run still surfaces a
-    usable record.
+    When *ext.blocked* is True (page inaccessible / HTTP 403) **or** the
+    extraction yielded no usable data (HTTP 200 but no title, company, or
+    description), the posting is populated from the raw search-result
+    metadata so the run still surfaces a usable record.
     """
     from internship_engine.models import JobPosting
 
+    # Treat an empty extraction the same as a blocked one for fallback
+    # purposes — a posting with no title, company, AND description is
+    # unusable regardless of HTTP status.
+    use_fallback = ext.blocked or (
+        not ext.title and not ext.company and not ext.description
+    )
+
     return JobPosting(
         title=ext.title or result.title,
-        company=ext.company or ("Unknown" if ext.blocked else ""),
-        location=ext.location or ("Unknown" if ext.blocked else ""),
-        description=ext.description or (result.snippet if ext.blocked else ""),
+        company=ext.company or ("Unknown" if use_fallback else ""),
+        location=ext.location or ("Unknown" if use_fallback else ""),
+        description=ext.description or (
+            result.snippet if use_fallback else ""
+        ),
         posting_url=result.url,
         apply_url=ext.apply_url,
         date_posted=ext.date_posted,

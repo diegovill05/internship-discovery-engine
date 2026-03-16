@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 from internship_engine.extractor import (
     Extractor,
+    _is_job_posting,
     _parse_date,
     parse_html,
 )
@@ -146,6 +147,121 @@ _APPLY_URL_HTML = """
 """
 
 _BLOCKED_HTML = ""  # empty body simulates a blocked/empty response
+
+# @type variant fixtures
+_TYPE_LIST_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@type": ["JobPosting"],
+  "title": "List Type Intern",
+  "hiringOrganization": {"name": "ListCo"}
+}
+</script>
+</body></html>
+"""
+
+_TYPE_MULTI_LIST_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@type": ["JobPosting", "SpecialAnnouncement"],
+  "title": "Multi Type Intern",
+  "hiringOrganization": {"name": "MultiCo"}
+}
+</script>
+</body></html>
+"""
+
+_TYPE_SCHEMA_PREFIX_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@type": "schema:JobPosting",
+  "title": "Prefix Intern",
+  "hiringOrganization": {"name": "PrefixCo"}
+}
+</script>
+</body></html>
+"""
+
+_TYPE_FULL_URL_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@type": "https://schema.org/JobPosting",
+  "title": "URL Type Intern",
+  "hiringOrganization": {"name": "URLCo"}
+}
+</script>
+</body></html>
+"""
+
+_TYPE_LIST_IN_GRAPH_HTML = """
+<html><body>
+<script type="application/ld+json">
+{
+  "@graph": [
+    {"@type": "WebPage", "name": "Careers"},
+    {
+      "@type": ["JobPosting"],
+      "title": "Graph List Intern",
+      "hiringOrganization": {"name": "GraphListCo"}
+    }
+  ]
+}
+</script>
+</body></html>
+"""
+
+# Meta / OG fallback fixtures
+_OG_TAGS_HTML = """
+<html>
+<head>
+  <title>Careers | TechCorp</title>
+  <meta property="og:title" content="Backend Intern at TechCorp" />
+  <meta property="og:description" content="Join our backend team." />
+  <meta property="og:site_name" content="TechCorp" />
+</head>
+<body><h1>Apply now</h1></body>
+</html>
+"""
+
+_META_DESCRIPTION_ONLY_HTML = """
+<html>
+<head>
+  <title>Job Opening</title>
+  <meta name="description" content="Exciting data internship." />
+</head>
+<body></body>
+</html>
+"""
+
+_TITLE_ONLY_HTML = """
+<html>
+<head><title>DevOps Intern – CloudInc</title></head>
+<body><p>No meta tags here.</p></body>
+</html>
+"""
+
+_JSON_LD_AND_OG_HTML = """
+<html>
+<head>
+  <meta property="og:title" content="OG Title Should Be Ignored" />
+  <meta property="og:description" content="OG desc ignored" />
+</head>
+<body>
+<script type="application/ld+json">
+{
+  "@type": "JobPosting",
+  "title": "JSON-LD Wins",
+  "hiringOrganization": {"name": "StructuredCo"},
+  "description": "Structured description."
+}
+</script>
+</body>
+</html>
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -438,3 +554,136 @@ class TestExtractorFetchAndExtract:
         ext = Extractor(session=_mock_session(text=""))
         result = ext.fetch_and_extract("https://example.com/job")
         assert result.blocked is False
+
+
+# ---------------------------------------------------------------------------
+# _is_job_posting — flexible @type matching
+# ---------------------------------------------------------------------------
+
+
+class TestIsJobPosting:
+    def test_plain_string(self):
+        assert _is_job_posting("JobPosting") is True
+
+    def test_single_element_list(self):
+        assert _is_job_posting(["JobPosting"]) is True
+
+    def test_multi_element_list(self):
+        assert _is_job_posting(["JobPosting", "SpecialAnnouncement"]) is True
+
+    def test_schema_prefix(self):
+        assert _is_job_posting("schema:JobPosting") is True
+
+    def test_https_url_prefix(self):
+        assert _is_job_posting("https://schema.org/JobPosting") is True
+
+    def test_http_url_prefix(self):
+        assert _is_job_posting("http://schema.org/JobPosting") is True
+
+    def test_non_matching_string(self):
+        assert _is_job_posting("WebPage") is False
+
+    def test_non_matching_list(self):
+        assert _is_job_posting(["WebPage", "CreativeWork"]) is False
+
+    def test_none_value(self):
+        assert _is_job_posting(None) is False
+
+    def test_integer_value(self):
+        assert _is_job_posting(42) is False
+
+
+# ---------------------------------------------------------------------------
+# parse_html — @type variant detection
+# ---------------------------------------------------------------------------
+
+
+class TestParseHtmlTypeVariants:
+    def test_type_as_single_element_list(self):
+        r = parse_html(_TYPE_LIST_HTML)
+        assert r.title == "List Type Intern"
+        assert r.company == "ListCo"
+
+    def test_type_as_multi_element_list(self):
+        r = parse_html(_TYPE_MULTI_LIST_HTML)
+        assert r.title == "Multi Type Intern"
+        assert r.company == "MultiCo"
+
+    def test_type_with_schema_prefix(self):
+        r = parse_html(_TYPE_SCHEMA_PREFIX_HTML)
+        assert r.title == "Prefix Intern"
+        assert r.company == "PrefixCo"
+
+    def test_type_with_full_url_prefix(self):
+        r = parse_html(_TYPE_FULL_URL_HTML)
+        assert r.title == "URL Type Intern"
+        assert r.company == "URLCo"
+
+    def test_type_list_in_graph(self):
+        r = parse_html(_TYPE_LIST_IN_GRAPH_HTML)
+        assert r.title == "Graph List Intern"
+        assert r.company == "GraphListCo"
+
+
+# ---------------------------------------------------------------------------
+# parse_html — meta / OG fallback
+# ---------------------------------------------------------------------------
+
+
+class TestParseHtmlMetaFallback:
+    def test_og_title_extracted(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.title == "Backend Intern at TechCorp"
+
+    def test_og_description_extracted(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.description == "Join our backend team."
+
+    def test_og_site_name_as_company(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.company == "TechCorp"
+
+    def test_og_preferred_over_html_title(self):
+        """og:title should win over <title> tag."""
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.title == "Backend Intern at TechCorp"
+        assert "Careers" not in r.title
+
+    def test_html_title_fallback_when_no_og(self):
+        r = parse_html(_TITLE_ONLY_HTML)
+        assert r.title == "DevOps Intern – CloudInc"
+
+    def test_meta_description_fallback(self):
+        """<meta name='description'> used when og:description absent."""
+        r = parse_html(_META_DESCRIPTION_ONLY_HTML)
+        assert r.description == "Exciting data internship."
+
+    def test_fallback_date_is_none(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.date_posted is None
+
+    def test_fallback_confidence_is_unknown(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.date_posted_confidence == DatePostedConfidence.UNKNOWN
+
+    def test_fallback_not_blocked(self):
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.blocked is False
+
+    def test_fallback_location_empty(self):
+        """Meta fallback cannot determine location."""
+        r = parse_html(_OG_TAGS_HTML)
+        assert r.location == ""
+
+    def test_json_ld_preferred_over_meta(self):
+        """When JSON-LD is present, OG tags are ignored."""
+        r = parse_html(_JSON_LD_AND_OG_HTML)
+        assert r.title == "JSON-LD Wins"
+        assert r.company == "StructuredCo"
+        assert r.description == "Structured description."
+
+    def test_no_tags_at_all_returns_empty(self):
+        r = parse_html("<html><body>Hello</body></html>")
+        assert r.title == ""
+        assert r.company == ""
+        assert r.description == ""
