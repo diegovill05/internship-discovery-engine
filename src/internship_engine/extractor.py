@@ -51,8 +51,22 @@ _RETRY_ON_STATUS = [429, 500, 502, 503, 504]
 
 
 # ---------------------------------------------------------------------------
-# Result dataclass
+# Result dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class FetchResult:
+    """HTTP response metadata captured during :meth:`Extractor.fetch_and_extract`.
+
+    Allows downstream consumers (e.g. active-check) to reuse the
+    already-fetched page instead of making a second HTTP request.
+    """
+
+    status_code: int = 0
+    html: str = ""
+    final_url: str = ""
+    error: str = ""
 
 
 @dataclass
@@ -73,6 +87,7 @@ class ExtractionResult:
     apply_url: Optional[str] = None
     employment_type: str = ""
     blocked: bool = False
+    fetch_result: Optional[FetchResult] = None
 
 
 # ---------------------------------------------------------------------------
@@ -153,19 +168,40 @@ class Extractor:
             resp.raise_for_status()
         except requests.exceptions.Timeout:
             logger.warning("Extractor timed out fetching %s", url)
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(error="timeout"),
+            )
         except requests.exceptions.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
             logger.warning(
                 "Extractor received HTTP %s for %s",
-                exc.response.status_code,
+                code,
                 url,
             )
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(
+                    status_code=code,
+                    html=exc.response.text if exc.response is not None else "",
+                    final_url=str(exc.response.url) if exc.response is not None else url,
+                ),
+            )
         except requests.exceptions.RequestException as exc:
             logger.warning("Extractor request failed for %s: %s", url, exc)
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(error=str(exc)),
+            )
 
-        return parse_html(resp.text, source_url=url)
+        fetch_result = FetchResult(
+            status_code=resp.status_code,
+            html=resp.text,
+            final_url=str(resp.url),
+        )
+        result = parse_html(resp.text, source_url=url)
+        result.fetch_result = fetch_result
+        return result
 
 
 # ---------------------------------------------------------------------------

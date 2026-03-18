@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 
 from internship_engine.extractor import (
     Extractor,
+    FetchResult,
     _is_job_posting,
     _parse_date,
     parse_html,
@@ -492,12 +493,20 @@ class TestParseDateFunction:
 # ---------------------------------------------------------------------------
 
 
-def _mock_session(status_code: int = 200, text: str = _FULL_POSTING_HTML) -> MagicMock:
+_TEST_URL = "https://example.com/job"
+
+
+def _mock_session(
+    status_code: int = 200,
+    text: str = _FULL_POSTING_HTML,
+    url: str = _TEST_URL,
+) -> MagicMock:
     """Build a mock requests.Session whose GET returns the given response."""
     session = MagicMock()
     response = MagicMock()
     response.status_code = status_code
     response.text = text
+    response.url = url
     if status_code >= 400:
         from requests.exceptions import HTTPError
 
@@ -687,3 +696,62 @@ class TestParseHtmlMetaFallback:
         assert r.title == ""
         assert r.company == ""
         assert r.description == ""
+
+
+# ---------------------------------------------------------------------------
+# FetchResult — populated by Extractor.fetch_and_extract
+# ---------------------------------------------------------------------------
+
+
+class TestFetchResult:
+    def test_success_populates_fetch_result(self):
+        ext = Extractor(session=_mock_session())
+        result = ext.fetch_and_extract(_TEST_URL)
+        assert result.fetch_result is not None
+        assert result.fetch_result.status_code == 200
+        assert result.fetch_result.html == _FULL_POSTING_HTML
+        assert result.fetch_result.final_url == _TEST_URL
+        assert result.fetch_result.error == ""
+
+    def test_http_error_populates_fetch_result(self):
+        ext = Extractor(session=_mock_session(status_code=404))
+        result = ext.fetch_and_extract(_TEST_URL)
+        assert result.blocked is True
+        assert result.fetch_result is not None
+        assert result.fetch_result.status_code == 404
+        assert result.fetch_result.error == ""
+
+    def test_timeout_populates_fetch_result_with_error(self):
+        from requests.exceptions import Timeout
+
+        session = MagicMock()
+        session.get.side_effect = Timeout()
+        ext = Extractor(session=session)
+        result = ext.fetch_and_extract(_TEST_URL)
+        assert result.blocked is True
+        assert result.fetch_result is not None
+        assert result.fetch_result.error == "timeout"
+        assert result.fetch_result.status_code == 0
+
+    def test_connection_error_populates_fetch_result_with_error(self):
+        from requests.exceptions import ConnectionError as ReqConnError
+
+        session = MagicMock()
+        session.get.side_effect = ReqConnError("refused")
+        ext = Extractor(session=session)
+        result = ext.fetch_and_extract(_TEST_URL)
+        assert result.blocked is True
+        assert result.fetch_result is not None
+        assert result.fetch_result.error == "refused"
+
+    def test_redirect_captures_final_url(self):
+        final = "https://example.com/job/redirected"
+        ext = Extractor(session=_mock_session(url=final))
+        result = ext.fetch_and_extract(_TEST_URL)
+        assert result.fetch_result is not None
+        assert result.fetch_result.final_url == final
+
+    def test_parse_html_has_no_fetch_result(self):
+        """parse_html is pure — it never produces a FetchResult."""
+        result = parse_html(_FULL_POSTING_HTML)
+        assert result.fetch_result is None

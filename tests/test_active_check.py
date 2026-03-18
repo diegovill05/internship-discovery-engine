@@ -10,6 +10,7 @@ import requests
 from internship_engine.active_check import (
     ActiveCheckResult,
     check_active,
+    check_active_from_response,
 )
 from internship_engine.models import ActiveStatus
 
@@ -212,3 +213,101 @@ class TestReturnType:
             MockSession.return_value = ms
             result = check_active("https://example.com/job/99")
         assert result.status == ActiveStatus.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# check_active_from_response — pure function (no I/O)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckActiveFromResponse:
+    """Mirrors the check_active tests but exercises the pure function directly."""
+
+    # HTTP 404/410 → INACTIVE
+    def test_404_returns_inactive(self):
+        result = check_active_from_response(404)
+        assert result.status == ActiveStatus.INACTIVE
+        assert "404" in result.reason
+
+    def test_410_returns_inactive(self):
+        result = check_active_from_response(410)
+        assert result.status == ActiveStatus.INACTIVE
+        assert "410" in result.reason
+
+    # HTTP 403/429 → UNKNOWN
+    def test_403_returns_unknown(self):
+        result = check_active_from_response(403)
+        assert result.status == ActiveStatus.UNKNOWN
+        assert "403" in result.reason
+
+    def test_429_returns_unknown(self):
+        result = check_active_from_response(429)
+        assert result.status == ActiveStatus.UNKNOWN
+
+    # HTTP 5xx → UNKNOWN
+    def test_500_returns_unknown(self):
+        result = check_active_from_response(500)
+        assert result.status == ActiveStatus.UNKNOWN
+        assert "500" in result.reason
+
+    def test_503_returns_unknown(self):
+        result = check_active_from_response(503)
+        assert result.status == ActiveStatus.UNKNOWN
+
+    # HTTP 200 with closed signals → INACTIVE
+    @pytest.mark.parametrize(
+        "signal",
+        [
+            "no longer available",
+            "position has been filled",
+            "job closed",
+            "not accepting applications",
+        ],
+    )
+    def test_closed_signal_returns_inactive(self, signal: str):
+        html = f"<html><body><p>{signal}</p></body></html>"
+        result = check_active_from_response(200, html)
+        assert result.status == ActiveStatus.INACTIVE
+        assert "closed signal" in result.reason
+
+    def test_closed_signal_case_insensitive(self):
+        result = check_active_from_response(200, "Position Has Been Filled")
+        assert result.status == ActiveStatus.INACTIVE
+
+    # HTTP 200, no closed signals → ACTIVE
+    def test_clean_page_returns_active(self):
+        html = "<html><body><h1>Software Intern</h1></body></html>"
+        result = check_active_from_response(200, html)
+        assert result.status == ActiveStatus.ACTIVE
+
+    def test_apply_button_noted(self):
+        html = '<button type="submit">Apply Now</button>'
+        result = check_active_from_response(200, html)
+        assert result.status == ActiveStatus.ACTIVE
+        assert "apply" in result.reason.lower()
+
+    def test_no_apply_button_still_active(self):
+        html = "<html><body><p>Great role.</p></body></html>"
+        result = check_active_from_response(200, html)
+        assert result.status == ActiveStatus.ACTIVE
+        assert "no closed signals" in result.reason
+
+    # Unexpected / zero status → UNKNOWN
+    def test_status_zero_returns_unknown(self):
+        result = check_active_from_response(0)
+        assert result.status == ActiveStatus.UNKNOWN
+
+    def test_201_returns_unknown(self):
+        result = check_active_from_response(201)
+        assert result.status == ActiveStatus.UNKNOWN
+
+    # check_active delegates to check_active_from_response
+    def test_check_active_delegates(self):
+        """check_active(url) should produce the same result as
+        check_active_from_response(status_code, html) for the same response."""
+        html = "<html><body>position has been filled</body></html>"
+        session = _mock_session(200, html)
+        url_result = check_active(_URL, session)
+        pure_result = check_active_from_response(200, html)
+        assert url_result.status == pure_result.status
+        assert url_result.reason == pure_result.reason

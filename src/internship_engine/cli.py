@@ -213,7 +213,11 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_run(args: argparse.Namespace) -> int:
     """Fetch → extract → filter → deduplicate → track → active-check → print."""
     # Lazy imports keep startup fast when other subcommands are used
-    from internship_engine.active_check import ActiveStatus, check_active
+    from internship_engine.active_check import (
+        ActiveStatus,
+        check_active,
+        check_active_from_response,
+    )
     from internship_engine.categorization import categorize
     from internship_engine.config import get_settings
     from internship_engine.deduplication import (
@@ -221,7 +225,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         load_hashes,
         save_hashes,
     )
-    from internship_engine.extractor import Extractor
+    from internship_engine.extractor import Extractor, FetchResult
     from internship_engine.location_filter import LocationFilter
     from internship_engine.models import DatePostedConfidence, JobPosting
     from internship_engine.tracks import (
@@ -274,9 +278,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     postings: list[JobPosting] = []
+    fetch_results: dict[str, FetchResult] = {}  # keyed by posting_url
 
     for result in raw_results:
         ext = extractor.fetch_and_extract(result.url)
+
+        # Stash fetch metadata for later active-check reuse
+        if ext.fetch_result is not None:
+            fetch_results[result.url] = ext.fetch_result
 
         # Build JobPosting — fall back to search snippet when extraction failed
         posting = _make_posting(result, ext, source_name)
@@ -323,7 +332,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         checked: list[JobPosting] = []
 
         for posting in postings[:limit]:
-            result = check_active(posting.posting_url)
+            fr = fetch_results.get(posting.posting_url)
+            if fr is not None and not fr.error:
+                result = check_active_from_response(fr.status_code, fr.html)
+            else:
+                result = check_active(posting.posting_url)
             posting = posting.model_copy(
                 update={
                     "active_status": result.status,
