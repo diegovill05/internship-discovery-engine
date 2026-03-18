@@ -184,7 +184,9 @@ class Extractor:
                 fetch_result=FetchResult(
                     status_code=code,
                     html=exc.response.text if exc.response is not None else "",
-                    final_url=str(exc.response.url) if exc.response is not None else url,
+                    final_url=(
+                        str(exc.response.url) if exc.response is not None else url
+                    ),
                 ),
             )
         except requests.exceptions.RequestException as exc:

@@ -12,7 +12,6 @@ from unittest.mock import MagicMock
 
 from internship_engine.extractor import (
     Extractor,
-    FetchResult,
     _is_job_posting,
     _parse_date,
     parse_html,
