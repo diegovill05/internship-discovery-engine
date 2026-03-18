@@ -201,7 +201,7 @@ def upsert_rows(
             if h:
                 existing_hashes.add(h)
 
-    appended = 0
+    new_rows: list[list[str]] = []
     for posting in postings:
         h = compute_hash(posting)
         if h in existing_hashes:
@@ -210,13 +210,14 @@ def upsert_rows(
             )
             continue
 
-        row = _posting_to_row(posting, h, today_str)
-        worksheet.append_row(row, value_input_option="USER_ENTERED")
+        new_rows.append(_posting_to_row(posting, h, today_str))
         existing_hashes.add(h)
-        appended += 1
-        logger.debug("Appended posting: %s @ %s", posting.title, posting.company)
+        logger.debug("Queued posting: %s @ %s", posting.title, posting.company)
 
-    return appended
+    if new_rows:
+        worksheet.append_rows(new_rows, value_input_option="USER_ENTERED")
+
+    return len(new_rows)
 
 
 # ---------------------------------------------------------------------------

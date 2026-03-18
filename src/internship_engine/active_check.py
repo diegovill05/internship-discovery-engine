@@ -89,6 +89,58 @@ class ActiveCheckResult:
 # ---------------------------------------------------------------------------
 
 
+def check_active_from_response(
+    status_code: int,
+    html: str = "",
+) -> ActiveCheckResult:
+    """Determine active status from an already-fetched HTTP response.
+
+    This is a **pure function** — no I/O.  It applies the same verdict logic
+    as :func:`check_active` but works on response data that was captured
+    during an earlier fetch (e.g. by :class:`~internship_engine.extractor.Extractor`).
+
+    Parameters
+    ----------
+    status_code:
+        HTTP status code of the response.
+    html:
+        Raw response body text (used for closed-signal scanning on HTTP 200).
+    """
+    if status_code in _GONE_CODES:
+        return ActiveCheckResult(ActiveStatus.INACTIVE, f"HTTP {status_code}")
+
+    if status_code in _BLOCKED_CODES:
+        return ActiveCheckResult(
+            ActiveStatus.UNKNOWN, f"HTTP {status_code} — page blocked"
+        )
+
+    if status_code >= 500:
+        return ActiveCheckResult(
+            ActiveStatus.UNKNOWN, f"HTTP {status_code} server error"
+        )
+
+    if status_code == 200:
+        html_lower = html.lower()
+        for signal in _CLOSED_SIGNALS:
+            if signal in html_lower:
+                return ActiveCheckResult(
+                    ActiveStatus.INACTIVE,
+                    f"closed signal: '{signal}'",
+                )
+
+        # Apply heuristic: note it in the reason, but don't block on absence
+        has_apply = any(sig in html_lower for sig in _APPLY_SIGNALS)
+        reason = (
+            "apply button detected"
+            if has_apply
+            else "no closed signals found"
+        )
+        return ActiveCheckResult(ActiveStatus.ACTIVE, reason)
+
+    # Unexpected 2xx/3xx after redirect, or status_code == 0
+    return ActiveCheckResult(ActiveStatus.UNKNOWN, f"HTTP {status_code}")
+
+
 def check_active(
     url: str,
     session: requests.Session | None = None,
@@ -96,6 +148,11 @@ def check_active(
     timeout: float = 8.0,
 ) -> ActiveCheckResult:
     """Return an :class:`ActiveCheckResult` for *url*.
+
+    Fetches the URL and delegates verdict logic to
+    :func:`check_active_from_response`.  Use this when no prior fetch data
+    is available; prefer ``check_active_from_response`` when the page has
+    already been fetched (e.g. during extraction).
 
     Parameters
     ----------
@@ -122,38 +179,4 @@ def check_active(
         logger.debug("active_check: request failed for %s: %s", url, exc)
         return ActiveCheckResult(ActiveStatus.UNKNOWN, f"request failed: {exc}")
 
-    code = resp.status_code
-
-    if code in _GONE_CODES:
-        return ActiveCheckResult(ActiveStatus.INACTIVE, f"HTTP {code}")
-
-    if code in _BLOCKED_CODES:
-        return ActiveCheckResult(
-            ActiveStatus.UNKNOWN, f"HTTP {code} — page blocked"
-        )
-
-    if code >= 500:
-        return ActiveCheckResult(
-            ActiveStatus.UNKNOWN, f"HTTP {code} server error"
-        )
-
-    if code == 200:
-        html_lower = resp.text.lower()
-        for signal in _CLOSED_SIGNALS:
-            if signal in html_lower:
-                return ActiveCheckResult(
-                    ActiveStatus.INACTIVE,
-                    f"closed signal: '{signal}'",
-                )
-
-        # Apply heuristic: note it in the reason, but don't block on absence
-        has_apply = any(sig in html_lower for sig in _APPLY_SIGNALS)
-        reason = (
-            "apply button detected"
-            if has_apply
-            else "no closed signals found"
-        )
-        return ActiveCheckResult(ActiveStatus.ACTIVE, reason)
-
-    # Unexpected 2xx/3xx after redirect
-    return ActiveCheckResult(ActiveStatus.UNKNOWN, f"HTTP {code}")
+    return check_active_from_response(resp.status_code, resp.text)

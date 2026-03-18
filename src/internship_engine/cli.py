@@ -21,6 +21,7 @@ $ internship-engine menu
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from datetime import date, timedelta
 
@@ -42,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Enable verbose logging (DEBUG level). Default shows WARNING+.",
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -143,6 +151,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
+        "--no-ats",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable ATS-targeted queries (Workday, Greenhouse, Lever, "
+            "SmartRecruiters). By default, site-restricted queries for "
+            "known ATS platforms are run before generic queries."
+        ),
+    )
+    run_parser.add_argument(
         "--only-active",
         action="store_true",
         default=False,
@@ -195,11 +213,19 @@ def build_parser() -> argparse.ArgumentParser:
 def cmd_run(args: argparse.Namespace) -> int:
     """Fetch → extract → filter → deduplicate → track → active-check → print."""
     # Lazy imports keep startup fast when other subcommands are used
-    from internship_engine.active_check import ActiveStatus, check_active
+    from internship_engine.active_check import (
+        ActiveStatus,
+        check_active,
+        check_active_from_response,
+    )
     from internship_engine.categorization import categorize
     from internship_engine.config import get_settings
-    from internship_engine.deduplication import DuplicateFilter
-    from internship_engine.extractor import Extractor
+    from internship_engine.deduplication import (
+        DuplicateFilter,
+        load_hashes,
+        save_hashes,
+    )
+    from internship_engine.extractor import Extractor, FetchResult
     from internship_engine.location_filter import LocationFilter
     from internship_engine.models import DatePostedConfidence, JobPosting
     from internship_engine.tracks import (
@@ -220,11 +246,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     track_enum = Track(args.track)
     effective_keywords = args.keywords or track_query_terms(track_enum)
 
+    # ── Resolve ATS targeting ─────────────────────────────────────────────
+    from internship_engine.sources.google_search import ATS_DOMAINS
+
+    ats = None if args.no_ats else ATS_DOMAINS
+
     # ── Fetch raw search results ──────────────────────────────────────────
     raw_results = source.fetch(
         locations=args.locations,
         keywords=effective_keywords,
         categories=args.categories,
+        ats_domains=ats,
     )
 
     if not raw_results:
@@ -237,7 +269,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         allowed_locations=tuple(args.locations),
         include_remote=not args.no_remote,
     )
-    dup_filter = DuplicateFilter()
+    initial_hashes = load_hashes(settings.seen_hashes_path)
+    dup_filter = DuplicateFilter(initial_hashes=initial_hashes)
     cutoff: date | None = (
         date.today() - timedelta(days=args.posted_within_days)
         if args.posted_within_days is not None
@@ -245,9 +278,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     postings: list[JobPosting] = []
+    fetch_results: dict[str, FetchResult] = {}  # keyed by posting_url
 
     for result in raw_results:
         ext = extractor.fetch_and_extract(result.url)
+
+        # Stash fetch metadata for later active-check reuse
+        if ext.fetch_result is not None:
+            fetch_results[result.url] = ext.fetch_result
 
         # Build JobPosting — fall back to search snippet when extraction failed
         posting = _make_posting(result, ext, source_name)
@@ -261,8 +299,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         ):
             continue
 
-        # ── Location filter (skip for blocked postings — location unknown) ─
-        if not ext.blocked and not loc_filter.matches(posting):
+        # ── Location filter (skip when location is unknown — blocked or
+        #    empty extraction where we fell back to "Unknown") ──────────
+        location_unknown = ext.blocked or posting.location == "Unknown"
+        if not location_unknown and not loc_filter.matches(posting):
             continue
 
         # ── Deduplication ─────────────────────────────────────────────────
@@ -292,7 +332,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         checked: list[JobPosting] = []
 
         for posting in postings[:limit]:
-            result = check_active(posting.posting_url)
+            fr = fetch_results.get(posting.posting_url)
+            if fr is not None and not fr.error:
+                result = check_active_from_response(fr.status_code, fr.html)
+            else:
+                result = check_active(posting.posting_url)
             posting = posting.model_copy(
                 update={
                     "active_status": result.status,
@@ -309,6 +353,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         checked.extend(postings[limit:])
         postings = checked
 
+    # ── Persist dedup hashes for next run ─────────────────────────────────
+    save_hashes(settings.seen_hashes_path, dup_filter.hashes())
+
     # ── Print summary ─────────────────────────────────────────────────────
     _print_summary(postings)
 
@@ -322,17 +369,27 @@ def cmd_run(args: argparse.Namespace) -> int:
 def _make_posting(result, ext, source_name: str):
     """Build a :class:`~internship_engine.models.JobPosting` from a search result.
 
-    When *ext.blocked* is True (page inaccessible / HTTP 403), the posting is
-    populated from the raw search-result metadata so the run still surfaces a
-    usable record.
+    When *ext.blocked* is True (page inaccessible / HTTP 403) **or** the
+    extraction yielded no usable data (HTTP 200 but no title, company, or
+    description), the posting is populated from the raw search-result
+    metadata so the run still surfaces a usable record.
     """
     from internship_engine.models import JobPosting
 
+    # Treat an empty extraction the same as a blocked one for fallback
+    # purposes — a posting with no title, company, AND description is
+    # unusable regardless of HTTP status.
+    use_fallback = ext.blocked or (
+        not ext.title and not ext.company and not ext.description
+    )
+
     return JobPosting(
         title=ext.title or result.title,
-        company=ext.company or ("Unknown" if ext.blocked else ""),
-        location=ext.location or ("Unknown" if ext.blocked else ""),
-        description=ext.description or (result.snippet if ext.blocked else ""),
+        company=ext.company or ("Unknown" if use_fallback else ""),
+        location=ext.location or ("Unknown" if use_fallback else ""),
+        description=ext.description or (
+            result.snippet if use_fallback else ""
+        ),
         posting_url=result.url,
         apply_url=ext.apply_url,
         date_posted=ext.date_posted,
@@ -536,6 +593,8 @@ def cmd_menu(_args: argparse.Namespace) -> int:
         only_active=only_active,
         active_check_max=10,
         drop_unknown_active=False,
+        no_ats=False,
+        verbose=False,
     )
     return cmd_run(run_args)
 
@@ -564,6 +623,11 @@ def main(argv: list[str] | None = None) -> None:
     """Parse *argv* and dispatch to the appropriate command handler."""
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(levelname)s: %(name)s: %(message)s",
+    )
 
     handler = _HANDLERS.get(args.command)
     if handler is None:

@@ -5,10 +5,13 @@ Strategy
 1. Fetch the URL with ``requests`` (retry on transient errors, short timeout).
 2. Search every ``<script type="application/ld+json">`` block for a JSON-LD
    object whose ``@type`` is ``"JobPosting"`` (including nested ``@graph``
-   arrays).
+   arrays).  The ``@type`` value may be a string, a list, or use a
+   ``schema:`` / full-URL prefix.
 3. Parse the canonical schema.org JobPosting fields into an
    :class:`ExtractionResult`.
-4. If the page is unreachable or contains no structured data, return an
+4. When no JSON-LD is found, fall back to ``<meta>`` / Open Graph tags
+   for basic title, description, and company (site name).
+5. If the page is unreachable or contains no structured data, return an
    :class:`ExtractionResult` with ``blocked=True`` so the caller can fall
    back to the raw search-result metadata.
 
@@ -48,8 +51,22 @@ _RETRY_ON_STATUS = [429, 500, 502, 503, 504]
 
 
 # ---------------------------------------------------------------------------
-# Result dataclass
+# Result dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class FetchResult:
+    """HTTP response metadata captured during :meth:`Extractor.fetch_and_extract`.
+
+    Allows downstream consumers (e.g. active-check) to reuse the
+    already-fetched page instead of making a second HTTP request.
+    """
+
+    status_code: int = 0
+    html: str = ""
+    final_url: str = ""
+    error: str = ""
 
 
 @dataclass
@@ -70,6 +87,7 @@ class ExtractionResult:
     apply_url: Optional[str] = None
     employment_type: str = ""
     blocked: bool = False
+    fetch_result: Optional[FetchResult] = None
 
 
 # ---------------------------------------------------------------------------
@@ -93,26 +111,30 @@ def parse_html(html: str, source_url: str = "") -> ExtractionResult:
     Returns
     -------
     ExtractionResult
-        Populated from the first JSON-LD ``JobPosting`` block found, or an
-        empty result (all defaults) if no suitable schema is present.
+        Populated from the first JSON-LD ``JobPosting`` block found.  When
+        no JSON-LD is present, falls back to ``<meta>`` / Open Graph tags.
+        Returns an empty result (all defaults) if neither source provides
+        data.
     """
-    schema = _find_job_posting_schema(html)
-    if schema is None:
-        return ExtractionResult()
+    schema, soup = _find_job_posting_schema(html)
 
-    date_posted, confidence = _parse_date(schema.get("datePosted"))
-    apply_url = _parse_apply_url(schema, source_url)
+    if schema is not None:
+        date_posted, confidence = _parse_date(schema.get("datePosted"))
+        apply_url = _parse_apply_url(schema, source_url)
 
-    return ExtractionResult(
-        title=_text(schema.get("title")),
-        company=_parse_company(schema),
-        location=_parse_location(schema),
-        description=_text(schema.get("description")),
-        date_posted=date_posted,
-        date_posted_confidence=confidence,
-        apply_url=apply_url,
-        employment_type=_text(schema.get("employmentType")),
-    )
+        return ExtractionResult(
+            title=_text(schema.get("title")),
+            company=_parse_company(schema),
+            location=_parse_location(schema),
+            description=_text(schema.get("description")),
+            date_posted=date_posted,
+            date_posted_confidence=confidence,
+            apply_url=apply_url,
+            employment_type=_text(schema.get("employmentType")),
+        )
+
+    # No JSON-LD — try meta / Open Graph tags as a lightweight fallback
+    return _fallback_from_meta(soup)
 
 
 class Extractor:
@@ -146,19 +168,42 @@ class Extractor:
             resp.raise_for_status()
         except requests.exceptions.Timeout:
             logger.warning("Extractor timed out fetching %s", url)
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(error="timeout"),
+            )
         except requests.exceptions.HTTPError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
             logger.warning(
                 "Extractor received HTTP %s for %s",
-                exc.response.status_code,
+                code,
                 url,
             )
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(
+                    status_code=code,
+                    html=exc.response.text if exc.response is not None else "",
+                    final_url=(
+                        str(exc.response.url) if exc.response is not None else url
+                    ),
+                ),
+            )
         except requests.exceptions.RequestException as exc:
             logger.warning("Extractor request failed for %s: %s", url, exc)
-            return ExtractionResult(blocked=True)
+            return ExtractionResult(
+                blocked=True,
+                fetch_result=FetchResult(error=str(exc)),
+            )
 
-        return parse_html(resp.text, source_url=url)
+        fetch_result = FetchResult(
+            status_code=resp.status_code,
+            html=resp.text,
+            final_url=str(resp.url),
+        )
+        result = parse_html(resp.text, source_url=url)
+        result.fetch_result = fetch_result
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +211,15 @@ class Extractor:
 # ---------------------------------------------------------------------------
 
 
-def _find_job_posting_schema(html: str) -> dict | None:
-    """Return the first JSON-LD JobPosting object found in *html*, or None."""
+def _find_job_posting_schema(
+    html: str,
+) -> tuple[dict | None, BeautifulSoup]:
+    """Return ``(schema, soup)`` from *html*.
+
+    *schema* is the first JSON-LD ``JobPosting`` object found, or ``None``.
+    The :class:`BeautifulSoup` instance is always returned so callers can
+    attempt meta-tag fallback without re-parsing.
+    """
     soup = BeautifulSoup(html, "html.parser")
     for script in soup.find_all("script", type="application/ld+json"):
         raw = script.string or ""
@@ -178,15 +230,38 @@ def _find_job_posting_schema(html: str) -> dict | None:
 
         found = _extract_job_posting(data)
         if found is not None:
-            return found
+            return found, soup
 
-    return None
+    return None, soup
+
+
+def _is_job_posting(type_value: object) -> bool:
+    """Return True when *type_value* represents a ``JobPosting`` type.
+
+    Accepts the following forms used in real-world JSON-LD:
+
+    * ``"JobPosting"``
+    * ``["JobPosting"]`` or ``["JobPosting", "OtherType"]``
+    * ``"schema:JobPosting"``
+    * ``"https://schema.org/JobPosting"``
+    """
+    if isinstance(type_value, list):
+        return any(_is_job_posting(item) for item in type_value)
+    if not isinstance(type_value, str):
+        return False
+    # Strip known prefixes, then compare
+    normalized = type_value
+    for prefix in ("https://schema.org/", "http://schema.org/", "schema:"):
+        if normalized.startswith(prefix):
+            normalized = normalized[len(prefix) :]
+            break
+    return normalized == "JobPosting"
 
 
 def _extract_job_posting(data: object) -> dict | None:
     """Recursively search *data* for a JobPosting dict."""
     if isinstance(data, dict):
-        if data.get("@type") == "JobPosting":
+        if _is_job_posting(data.get("@type")):
             return data
         # Check @graph array (common pattern)
         for item in data.get("@graph", []):
@@ -199,6 +274,50 @@ def _extract_job_posting(data: object) -> dict | None:
             if result is not None:
                 return result
     return None
+
+
+# ---------------------------------------------------------------------------
+# Meta / Open Graph fallback
+# ---------------------------------------------------------------------------
+
+
+def _fallback_from_meta(soup: BeautifulSoup) -> ExtractionResult:
+    """Build an :class:`ExtractionResult` from ``<meta>`` / OG tags.
+
+    Called only when no JSON-LD ``JobPosting`` was found.  Extracts:
+
+    * **title** — ``og:title``, falling back to the ``<title>`` element.
+    * **description** — ``og:description``, then ``<meta name="description">``.
+    * **company** — ``og:site_name``.
+
+    All other fields keep their empty/default values.  Because this data
+    is not from a structured schema, ``date_posted_confidence`` stays
+    ``UNKNOWN``.
+    """
+    title = _meta_content(soup, property="og:title")
+    if not title:
+        tag = soup.find("title")
+        title = tag.get_text(strip=True) if tag else ""
+
+    description = _meta_content(soup, property="og:description")
+    if not description:
+        description = _meta_content(soup, name="description")
+
+    company = _meta_content(soup, property="og:site_name")
+
+    return ExtractionResult(
+        title=title,
+        company=company,
+        description=description,
+    )
+
+
+def _meta_content(soup: BeautifulSoup, **attrs: str) -> str:
+    """Return the ``content`` attribute of the first matching ``<meta>`` tag."""
+    tag = soup.find("meta", attrs=attrs)
+    if tag and tag.get("content"):
+        return str(tag["content"]).strip()
+    return ""
 
 
 # ---------------------------------------------------------------------------

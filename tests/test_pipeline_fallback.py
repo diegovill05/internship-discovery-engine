@@ -151,6 +151,59 @@ class TestMakePostingPartialExtraction:
 
 
 # ---------------------------------------------------------------------------
+# _make_posting: empty (not blocked) extraction — fallback to search result
+# ---------------------------------------------------------------------------
+
+
+def _ext_empty() -> ExtractionResult:
+    """Extraction that succeeded (HTTP 200) but found no data."""
+    return ExtractionResult(blocked=False)
+
+
+class TestMakePostingEmptyExtraction:
+    """When extraction is not blocked but yields no data, treat like blocked."""
+
+    def test_title_falls_back_to_search_result(self):
+        raw = _raw(title="Search Title")
+        p = _make_posting(raw, _ext_empty(), "brave")
+        assert p.title == "Search Title"
+
+    def test_company_is_unknown(self):
+        p = _make_posting(_raw(), _ext_empty(), "brave")
+        assert p.company == "Unknown"
+
+    def test_location_is_unknown(self):
+        p = _make_posting(_raw(), _ext_empty(), "brave")
+        assert p.location == "Unknown"
+
+    def test_description_uses_snippet(self):
+        raw = _raw(snippet="Snippet from search engine.")
+        p = _make_posting(raw, _ext_empty(), "brave")
+        assert p.description == "Snippet from search engine."
+
+    def test_date_is_none(self):
+        p = _make_posting(_raw(), _ext_empty(), "brave")
+        assert p.date_posted is None
+
+    def test_date_confidence_is_unknown(self):
+        p = _make_posting(_raw(), _ext_empty(), "brave")
+        assert p.date_posted_confidence == DatePostedConfidence.UNKNOWN
+
+    def test_not_blocked_flag(self):
+        """The extraction itself was not blocked, only empty."""
+        ext = _ext_empty()
+        assert ext.blocked is False
+
+    def test_partial_data_not_treated_as_empty(self):
+        """If title alone is present, it should NOT trigger fallback."""
+        ext = ExtractionResult(title="Has Title", blocked=False)
+        raw = _raw(snippet="Should not appear")
+        p = _make_posting(raw, ext, "brave")
+        assert p.company == ""  # not "Unknown"
+        assert p.description == ""  # not snippet
+
+
+# ---------------------------------------------------------------------------
 # Location-filter bypass for blocked postings
 # ---------------------------------------------------------------------------
 
@@ -177,6 +230,7 @@ class TestLocationFilterBypass:
             only_active=False,
             active_check_max=10,
             drop_unknown_active=False,
+            no_ats=True,
         )
 
         mock_source = MagicMock()

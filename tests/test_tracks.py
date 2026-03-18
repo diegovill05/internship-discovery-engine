@@ -296,3 +296,62 @@ class TestTrackQueryTerms:
     def test_it_returns_it_terms(self):
         terms = track_query_terms(Track.IT)
         assert any("IT" in t or "help desk" in t.lower() for t in terms)
+
+
+# ---------------------------------------------------------------------------
+# Word-boundary matching — false-positive regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestWordBoundaryFalsePositives:
+    """Ensure single-word keywords do not match inside larger words."""
+
+    def test_data_not_in_candidate(self):
+        """'data' must not match 'candidate data management'."""
+        p = _posting(title="HR Intern", description="manage candidate records")
+        assert score_track(p, Track.DATA) == 0
+
+    def test_network_not_in_networking_event(self):
+        """'network' must not match inside 'networking'."""
+        p = _posting(title="Marketing Intern", description="networking event planning")
+        assert score_track(p, Track.IT) == 0
+
+    def test_api_not_in_capital(self):
+        """'api' must not match inside 'capital'."""
+        p = _posting(title="Finance Intern", description="venture capital investment")
+        assert score_track(p, Track.SWE) == 0
+
+    def test_node_not_in_anodePlating(self):
+        """'node' must not match inside 'anode'."""
+        p = _posting(title="Chemistry Intern", description="anode plating process")
+        assert score_track(p, Track.SWE) == 0
+
+    def test_react_not_in_reaction(self):
+        """'react' must not match inside 'reaction'."""
+        p = _posting(title="Lab Intern", description="chemical reaction analysis")
+        assert score_track(p, Track.SWE) == 0
+
+    def test_store_not_in_restore(self):
+        """Negative keyword 'store' must not match inside 'restore'."""
+        p = _posting(
+            title="Software Engineer Intern",
+            description="restore database backups",
+        )
+        score = score_track(p, Track.SWE)
+        # Should get full credit — no penalty from 'store' inside 'restore'
+        assert score >= 10
+
+    def test_systems_not_in_ecosystems(self):
+        """'systems' must not match inside 'ecosystems'."""
+        p = _posting(title="Biology Intern", description="marine ecosystems research")
+        assert score_track(p, Track.IT) == 0
+
+    def test_exact_word_still_matches(self):
+        """'data' as a standalone word should still match."""
+        p = _posting(title="Intern", description="work with data pipelines")
+        assert score_track(p, Track.DATA) >= 1
+
+    def test_multi_word_phrase_still_matches(self):
+        """Multi-word phrases like 'software engineer' still use substring match."""
+        p = _posting(title="Software Engineer Intern")
+        assert score_track(p, Track.SWE) >= 10
