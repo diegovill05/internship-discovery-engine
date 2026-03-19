@@ -2,6 +2,36 @@ name: Test Internship Search
 
 on:
   workflow_dispatch:
+    inputs:
+      track:
+        description: "Career track to search"
+        required: false
+        default: "cyber"
+        type: choice
+        options:
+          - all
+          - cyber
+          - swe
+          - data
+          - it
+      max_results:
+        description: "Maximum number of search results"
+        required: false
+        default: "25"
+        type: string
+      export:
+        description: "Export format"
+        required: false
+        default: "sheets"
+        type: choice
+        options:
+          - sheets
+          - none
+      sheet_tab:
+        description: "Google Sheet tab name"
+        required: false
+        default: "Sheet1"
+        type: string
 
 jobs:
   test-search:
@@ -21,7 +51,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install .
 
-      - name: Run Brave search test
+      - name: Run internship search
         env:
           IE_BRAVE_API_KEY: ${{ secrets.IE_BRAVE_API_KEY }}
           IE_SHEET_ID: ${{ secrets.IE_SHEET_ID }}
@@ -29,7 +59,7 @@ jobs:
         run: |
           internship-engine run \
             --source brave \
-            --export sheets \
-            --sheet-tab "Sheet1" \
-            --track cyber \
-            --max-results 25
+            --export "${{ inputs.export }}" \
+            --sheet-tab "${{ inputs.sheet_tab }}" \
+            --track "${{ inputs.track }}" \
+            --max-results "${{ inputs.max_results }}"
